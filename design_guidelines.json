@@ -1,0 +1,110 @@
+{
+  "theme": "light",
+  "archetype": "Swiss & High-Contrast (Executive Apple/Linear Inspired)",
+  "colors": {
+    "primary": "#FF6B35",
+    "secondary": "#1E293B",
+    "success": "#22C55E",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "border": "#E2E8F0",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569"
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Outfit",
+      "body": "Manrope",
+      "mono": "JetBrains Mono"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl tracking-tight font-medium text-slate-900",
+      "h2": "text-2xl md:text-3xl tracking-tight font-medium text-slate-900",
+      "h3": "text-xl font-medium text-slate-900",
+      "body": "text-base text-slate-700 leading-relaxed",
+      "small": "text-sm text-slate-500",
+      "overline": "text-xs uppercase tracking-[0.2em] font-bold text-slate-400"
+    }
+  },
+  "spacing_and_layout": {
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "card_padding": "p-6 sm:p-8",
+    "grid_bento": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+    "border_radius": "rounded-2xl"
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#FF6B35] text-white hover:bg-[#E85D2A] transition-colors rounded-full px-6 py-2.5 font-medium shadow-[0_4px_14px_0_rgba(255,107,53,0.39)] hover:shadow-[0_6px_20px_rgba(255,107,53,0.23)] hover:-translate-y-0.5 transform duration-200 flex items-center justify-center gap-2",
+      "secondary": "bg-slate-100 text-slate-900 hover:bg-slate-200 transition-colors rounded-full px-6 py-2.5 font-medium flex items-center justify-center gap-2",
+      "outline": "border border-slate-200 bg-transparent hover:border-slate-300 text-slate-700 transition-colors rounded-full px-6 py-2.5 font-medium flex items-center justify-center gap-2"
+    },
+    "cards": {
+      "decision_card": "bg-white border border-slate-200/60 rounded-2xl p-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] flex flex-col gap-4 relative overflow-hidden",
+      "insight_highlight": "bg-orange-50/50 border border-orange-100 rounded-xl p-4 flex gap-3 items-start",
+      "glass_panel": "bg-white/70 backdrop-blur-xl border border-white/40 shadow-sm rounded-2xl p-6"
+    },
+    "ai_chat": {
+      "container": "max-w-4xl mx-auto flex flex-col gap-8 pb-32",
+      "user_bubble": "self-end max-w-[80%] bg-slate-100 text-slate-900 rounded-2xl rounded-tr-sm px-6 py-4 text-[16px] leading-relaxed",
+      "ai_bubble": "self-start w-full bg-white border border-slate-200 shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-3xl rounded-tl-sm p-8 text-[16px] text-slate-800 leading-relaxed space-y-6",
+      "ai_structure_status": "flex items-center gap-3 text-sm font-semibold text-slate-900 mb-2 uppercase tracking-wide",
+      "ai_structure_reason": "text-slate-600 border-l-2 border-slate-200 pl-4 py-1 my-3 text-lg",
+      "ai_structure_action": "mt-6 flex gap-3 flex-wrap items-center pt-4 border-t border-slate-100"
+    },
+    "voice_ui": {
+      "microphone_hero": "w-24 h-24 rounded-full bg-gradient-to-b from-[#FF6B35] to-[#E85D2A] text-white flex items-center justify-center shadow-[0_0_50px_rgba(255,107,53,0.5)] cursor-pointer hover:scale-105 transition-transform duration-300 z-50 fixed bottom-10 left-1/2 -translate-x-1/2",
+      "recording_state": "animate-[pulse_1.5s_ease-in-out_infinite] ring-8 ring-[#FF6B35]/20 ring-offset-4 ring-offset-[#F8FAFC]",
+      "waveform_container": "flex items-center justify-center gap-1.5 h-12",
+      "processing_state": "animate-spin border-t-2 border-r-2 border-[#FF6B35] rounded-full w-24 h-24"
+    },
+    "health_score_ring": {
+      "svg_container": "relative w-40 h-40",
+      "circle_bg": "text-slate-100 stroke-current",
+      "circle_progress": "text-[#FF6B35] stroke-current transition-all duration-1000 ease-out",
+      "center_content": "absolute inset-0 flex flex-col items-center justify-center",
+      "score_text": "text-4xl font-bold font-mono text-slate-900",
+      "label_text": "text-xs font-semibold text-slate-400 uppercase tracking-widest"
+    }
+  },
+  "motion": {
+    "page_transition": "animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out",
+    "card_hover": "transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-lg",
+    "voice_pulse": "animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"
+  },
+  "image_urls": [
+    {
+      "category": "logo",
+      "url": "https://customer-assets.emergentagent.com/job_3e65beac-5b38-463b-aed7-80966d9b7461/artifacts/q01frsl1_jhapay_logo.jpg",
+      "description": "JhaPay Official Logo (Teal/Cyan script wordmark)"
+    },
+    {
+      "category": "restaurant_interior_modern",
+      "url": "https://images.pexels.com/photos/33357444/pexels-photo-33357444.png?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Modern Restaurant Interior for background or hero section"
+    },
+    {
+      "category": "restaurant_interior_luxury",
+      "url": "https://images.pexels.com/photos/27626762/pexels-photo-27626762.png?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Luxurious Restaurant Interior for ambiance"
+    },
+    {
+      "category": "chef_portrait",
+      "url": "https://images.pexels.com/photos/24252237/pexels-photo-24252237.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Chef portrait for user profile, manager mode, or testimonials"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Strictly follow the Zero Dashboard Philosophy: One Question -> One Answer -> One Action. No complex data tables, use decision cards.",
+    "Implement the PIN login matching the classic POS system but with modern minimal glassmorphism on the #F8FAFC background.",
+    "The Hero of the AI COO Home is the Voice interface. The microphone button must be massive, central, and feature glowing orange drop shadows.",
+    "AI Chat must not look like ChatGPT. Use the structured 'Decision Card' layout within the chat (Status > Reason > Opportunity > Action buttons) per the ai_chat guidelines. AI Bubbles should look like native app cards.",
+    "Use Outfit for Headings and Manrope for body text. Enforce tracking-tight on all headers.",
+    "Restaurant Health Score must be implemented as a circular SVG progress ring, similar to Apple Watch rings.",
+    "Do NOT use 'Inter' or 'Roboto' fonts anywhere.",
+    "Include 'data-testid' on all interactive elements (buttons, inputs, links, cards, chat inputs).",
+    "The UI is an executive control center. Ensure it is fully responsive, with a 'manager mode' view optimized for mobile task lists.",
+    "Never use raw #000000 or #808080. Always use the specified slate colors for neutrals to match the Apple/Linear aesthetic."
+  ]
+}

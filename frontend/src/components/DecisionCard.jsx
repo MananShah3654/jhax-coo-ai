@@ -34,7 +34,6 @@ function ActionButton({ act, idx, msgIdx }) {
             return;
         }
         if (act.kind === "campaign") {
-            // Persist prefill so /marketing can pick it up
             try {
                 sessionStorage.setItem(
                     "campaign_prefill",
@@ -44,13 +43,33 @@ function ActionButton({ act, idx, msgIdx }) {
             navigate("/marketing", { state: { prefill: act.prefill || {} } });
             return;
         }
-        if (act.kind === "share") {
-            const t = SHARE_TYPES.has(act.target) ? act.target : "daily";
-            openShareModal(t);
+        if (act.kind === "promotion") {
+            try {
+                sessionStorage.setItem(
+                    "promotion_prefill",
+                    JSON.stringify(act.prefill || {})
+                );
+            } catch {}
+            navigate("/promotions", { state: { prefill: act.prefill || {} } });
             return;
         }
-        if (act.kind === "report") {
-            openShareModal(SHARE_TYPES.has(act.target) ? act.target : "daily");
+        if (act.kind === "notify") {
+            try {
+                sessionStorage.setItem(
+                    "manager_prefill",
+                    JSON.stringify({
+                        label: act.label,
+                        message: act.prefill?.message || act.label,
+                        branch: act.prefill?.branch,
+                    })
+                );
+            } catch {}
+            navigate("/manager", { state: { prefill: act.prefill || {} } });
+            return;
+        }
+        if (act.kind === "share" || act.kind === "report") {
+            const t = SHARE_TYPES.has(act.target) ? act.target : "daily";
+            openShareModal(t);
             return;
         }
         setBusy(true);

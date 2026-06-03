@@ -6,6 +6,7 @@ import {
     Users,
     UtensilsCrossed,
     Megaphone,
+    Sparkles,
     TrendingUp,
     ClipboardList,
     LogOut,
@@ -21,6 +22,7 @@ const NAV = [
     { to: "/customers", label: "Customers",    Icon: Users,          tid: TID.navCustomers },
     { to: "/menu",      label: "Menu",         Icon: UtensilsCrossed, tid: TID.navMenu },
     { to: "/marketing", label: "Marketing AI", Icon: Megaphone,      tid: TID.navMarketing },
+    { to: "/promotions",label: "Promotions",   Icon: Sparkles,       tid: "nav-promotions" },
     { to: "/forecast",  label: "Forecast",     Icon: TrendingUp,     tid: TID.navForecast },
     { to: "/manager",   label: "Manager Mode", Icon: ClipboardList,  tid: TID.navManager },
 ];

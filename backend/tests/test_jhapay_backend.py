@@ -289,6 +289,48 @@ class TestDataSource:
         assert "data_source" in d
         assert d["data_source"] == "mock"
 
+# -------------- Iteration 3: Promotion / Notify actions --------------
+class TestIter3Actions:
+    def test_promotion_action_from_combo_prompt(self, client):
+        r = client.post(f"{API}/ai/chat_once",
+                        json={"message": "Create a combo bundle for slow lunch hours"},
+                        timeout=120)
+        assert r.status_code == 200
+        reply = r.json()["reply"]
+        actions = reply.get("actions") or []
+        promos = [a for a in actions if a.get("kind") == "promotion"]
+        assert promos, f"no promotion action in reply: actions={actions}"
+        p = promos[0]
+        assert p.get("label"), f"promotion label empty: {p}"
+        prefill = p.get("prefill") or {}
+        assert isinstance(prefill, dict)
+        keys = set(prefill.keys())
+        # at least one of name/items/discount/audience
+        assert keys & {"name", "items", "discount", "audience"}, f"prefill missing fields: {prefill}"
+        if "items" in prefill:
+            assert isinstance(prefill["items"], list)
+        if "discount" in prefill:
+            assert isinstance(prefill["discount"], (int, float))
+
+    def test_notify_action_from_manager_prompt(self, client):
+        r = client.post(f"{API}/ai/chat_once",
+                        json={"message": "Tell my Downtown manager what to focus on"},
+                        timeout=120)
+        assert r.status_code == 200
+        reply = r.json()["reply"]
+        actions = reply.get("actions") or []
+        notifies = [a for a in actions if a.get("kind") == "notify"]
+        if notifies:  # not strictly required by spec, but if present must be well-formed
+            n = notifies[0]
+            assert n.get("label")
+            prefill = n.get("prefill") or {}
+            assert isinstance(prefill, dict)
+            assert ("branch" in prefill) or ("message" in prefill), f"notify prefill missing branch/message: {prefill}"
+        # Either way, response should mention Downtown / manager
+        joined = " ".join(str(v) for v in reply.values() if isinstance(v, str)).lower()
+        assert "downtown" in joined or "manager" in joined or notifies, f"unrelated reply: {reply}"
+
+
 
 class TestVoice:
     def test_transcribe_empty(self):

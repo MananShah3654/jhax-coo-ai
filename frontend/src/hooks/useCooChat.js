@@ -58,6 +58,7 @@ function partialExtract(buf) {
     };
     return {
         status: grab("status"),
+        clarify: grab("clarify"),
         reason: grab("reason"),
         opportunity: grab("opportunity"),
         action: grab("action"),

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import Layout from "@/components/Layout";
 import { Sparkles, Loader2, Send } from "lucide-react";
@@ -26,11 +27,34 @@ const GOALS = [
 ];
 
 export default function Marketing() {
+    const location = useLocation();
     const [audience, setAudience] = useState("at_risk");
     const [channel, setChannel] = useState("sms");
     const [goal, setGoal] = useState(GOALS[0]);
     const [draft, setDraft] = useState(null);
     const [busy, setBusy] = useState(false);
+
+    // Pick up prefill from /home → Launch Campaign or from an AI action button
+    useEffect(() => {
+        let pre = location.state?.prefill;
+        if (!pre) {
+            try {
+                pre = JSON.parse(sessionStorage.getItem("campaign_prefill") || "null");
+            } catch {
+                pre = null;
+            }
+        }
+        if (pre && typeof pre === "object") {
+            if (pre.audience && AUDIENCES.find((a) => a.id === pre.audience))
+                setAudience(pre.audience);
+            if (pre.channel && CHANNELS.find((c) => c.id === pre.channel))
+                setChannel(pre.channel);
+            if (pre.goal) setGoal(pre.goal);
+            try { sessionStorage.removeItem("campaign_prefill"); } catch {}
+            toast.info("Campaign prefilled from your AI COO");
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const generate = async () => {
         setBusy(true);

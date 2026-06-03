@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 2 regression for JhaPay AI COO. Backend: 33/33 pytest pass — including new PDF reports for all 6 types (daily/weekly/monthly/branch/investor/marketing) returning 200 with application/pdf, body >2KB, header '%PDF'; invalid type returns 400. Clarify gate verified for 'you','ok','hi','what?' (clarify+suggestions populated, no metric dump). Concise reply: status<=10 words, reason<=18, opportunity<=18, action<=10, actions<=3 with campaign->/marketing+prefill. Guardrail still works (status starts 'Out of scope' or reason contains \"I'm JhaPay AI COO\"). /api/dashboard now returns data_source='mock'. All previous endpoints unchanged and passing. Frontend: PIN 1234 login OK. Briefing 'Share Report' opens share-modal; PDF preview iframe loads with blob: URL; WhatsApp href starts https://wa.me/, Email href starts mailto:, share-download present; switching share-type-daily->weekly->monthly changes the iframe blob src each time. Briefing 'Launch Campaign' navigates to /marketing with audience=at_risk, channel=sms (orange), goal='Reactivate inactive customers' and toast fires. /chat with 'you' renders clarify card with 3 chips (clarify-suggestion-0..2); clicking a chip re-asks AI and a Decision Card appears. /chat with 'How is my business today?' renders compact card: ONE big headline, merged reason+opportunity paragraph with '·', metric chips, emerald +$994/wk impact pill top-right, exactly 2-3 action chips. Old verbose REASON/OPPORTUNITY/RECOMMENDED ACTION labels are NOT rendered. AI campaign action button ('Reactivate Customers') navigates to /marketing and prefills audience=at_risk + goal from AI prefill (e.g. 'Reactivate 51 inactive customers').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_jhapay_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ShareModal fetches /api/reports/{type}/pdf via fetch() — works but no auth header is sent (consistent with rest of app which currently doesn't authenticate beyond PIN login). Fine for current PIN-only demo.",
+    "WhatsApp/Email links embed the API URL directly (directPdf). When real users open this from a phone they'll need the link to be reachable publicly with no auth — currently true since /api/reports/{type}/pdf is unauthenticated. Flag if auth is ever added.",
+    "ShareModal does URL.revokeObjectURL on close but creates a new blob URL on every type switch without revoking the previous one — minor memory leak (3-6 blobs per session). Low priority.",
+    "ai_service.SYSTEM_PROMPT bakes literal example action objects (id='launch_campaign', etc.) which the model will often echo verbatim. Acceptable since they map to real handlers, but means the AI rarely invents context-specific action ids.",
+    "data_source.JhaPOSDataSource not exercised in this iteration (DATA_SOURCE=mock by default and JHAPOS_*_URL env not set). Adapter exists but no integration test for real HTTP path — recommended once real endpoints are wired."
+  ],
+  "updated_files": ["/app/backend/tests/test_jhapay_backend.py"],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "100% of in-scope iteration-2 flows"},
+  "test_credentials": "PIN 1234",
+  "seed_data_creation": "None — mock dataset is deterministic (random.Random(42)).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression: pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml. PDF tests just check 200 + %PDF magic + size>2KB; Claude clarify tests take 5-10s each. Frontend PIN entry is a number-pad (button per digit), NOT a text input — use page.get_by_role('button', name=d, exact=True). Chat input testid is 'chat-input' / 'chat-send' (fallback ask-input/ask-submit covered). Share modal type switching takes ~2-3s per regenerate; allow >=3s wait between clicks. AI campaign action button has orange class containing 'FF6B35' — that's the reliable selector for the campaign chip.",
+  "rca_of_the_issue": "Initial guardrail test failed because the previous decline phrase used 'I am' but the new SYSTEM_PROMPT uses 'I'm'. Updated assertion to match iteration-2 spec (status starts 'Out of scope' OR reason contains \"I'm JhaPay AI COO\"). All other tests passed on first run."
+}

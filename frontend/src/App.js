@@ -2,6 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import ShareModal from "@/components/ShareModal";
 import Login from "@/screens/Login";
 import Home from "@/screens/Home";
 import Chat from "@/screens/Chat";
@@ -108,6 +109,7 @@ export default function App() {
             <AuthProvider>
                 <BrowserRouter>
                     <AppRoutes />
+                    <ShareModal />
                     <Toaster
                         position="top-right"
                         richColors

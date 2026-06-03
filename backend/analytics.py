@@ -12,7 +12,23 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
-from mock_data import DATASET, BRANCHES, MENU_ITEMS
+from data_source import get_source
+
+DS = get_source()
+BRANCHES = DS.branches()
+MENU_ITEMS = DS.menu()
+
+
+def _customers():
+    return DS.customers()
+
+
+def _orders():
+    return DS.orders()
+
+
+def _owner():
+    return DS.owner()
 
 
 def _parse(ts: str) -> datetime:
@@ -25,7 +41,7 @@ def _today() -> datetime:
 
 def orders_between(start: datetime, end: datetime, branch_id: str | None = None) -> List[Dict]:
     out = []
-    for o in DATASET["orders"]:
+    for o in _orders():
         ts = _parse(o["ts"])
         if start <= ts < end and (branch_id is None or o["branch_id"] == branch_id):
             out.append(o)
@@ -112,7 +128,7 @@ def menu_performance(days: int = 30) -> List[Dict]:
 
 
 def customer_intelligence() -> Dict:
-    customers = DATASET["customers"]
+    customers = _customers()
     vip = [c for c in customers if "vip" in c["tags"]]
     at_risk = [c for c in customers if "at_risk" in c["tags"]]
     new = [c for c in customers if "new" in c["tags"]]
@@ -227,7 +243,7 @@ def daily_briefing() -> Dict:
     worst_seller = menu[-1]
     opportunity = round(ci["at_risk_count"] * ci["avg_lifetime_value"] * 0.15, 0)
     return {
-        "owner_name": DATASET["owner"]["name"],
+        "owner_name": _owner()["name"],
         "yesterday_revenue": yesterday_k["revenue"],
         "yesterday_orders": yesterday_k["orders"],
         "growth_pct": growth,

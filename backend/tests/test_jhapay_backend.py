@@ -136,15 +136,17 @@ class TestAIChat:
             assert "```" not in (reply.get(k) or ""), f"parsed reply.{k} has markdown fences"
 
     def test_chat_guardrail(self, client):
-        decline = ("I am JhaPay AI COO and can assist only with restaurant operations, "
-                   "revenue, customers, marketing, loyalty, payments, performance, and growth.")
         r = client.post(f"{API}/ai/chat_once",
                         json={"message": "Who is the president of the USA?"},
                         timeout=120)
         assert r.status_code == 200
-        d = r.json()
-        raw = (d.get("raw") or "") + " " + (d["reply"].get("reason") or "") + " " + (d["reply"].get("status") or "")
-        assert decline in raw, f"Guardrail decline not found. raw={d.get('raw')[:300]!r}"
+        reply = r.json()["reply"]
+        status = (reply.get("status") or "").strip()
+        reason = (reply.get("reason") or "").strip()
+        # Per iteration 2 spec: status starts with 'Out of scope' OR reason contains "I'm JhaPay AI COO"
+        assert status.lower().startswith("out of scope") or "i'm jhapay ai coo" in reason.lower(), (
+            f"Guardrail failed. status={status!r}, reason={reason!r}"
+        )
 
     def test_chat_streaming_sse(self):
         # use raw requests for SSE
@@ -219,6 +221,73 @@ def _make_wav_bytes() -> bytes:
         # 0.5s of silence
         w.writeframes(b"\x00\x00" * 8000)
     return buf.getvalue()
+
+
+# -------------- Iteration 2: PDF reports --------------
+class TestPdfReports:
+    @pytest.mark.parametrize("rtype", ["daily", "weekly", "monthly", "branch", "investor", "marketing"])
+    def test_pdf_ok(self, client, rtype):
+        r = client.get(f"{API}/reports/{rtype}/pdf", timeout=30)
+        assert r.status_code == 200, f"{rtype} -> {r.status_code} {r.text[:200]}"
+        ct = r.headers.get("content-type", "")
+        assert "application/pdf" in ct, f"{rtype} ct={ct}"
+        assert len(r.content) > 2048, f"{rtype} body too small ({len(r.content)} bytes)"
+        assert r.content[:4] == b"%PDF", f"{rtype} doesn't start with %PDF: {r.content[:8]!r}"
+
+    def test_pdf_invalid_type(self, client):
+        r = client.get(f"{API}/reports/bogus/pdf", timeout=15)
+        assert r.status_code == 400
+
+
+# -------------- Iteration 2: Clarification gate --------------
+class TestClarifyGate:
+    @pytest.mark.parametrize("msg", ["you", "ok", "hi", "what?"])
+    def test_short_input_returns_clarify(self, client, msg):
+        r = client.post(f"{API}/ai/chat_once", json={"message": msg}, timeout=120)
+        assert r.status_code == 200
+        reply = r.json()["reply"]
+        clarify = (reply.get("clarify") or "").strip()
+        suggestions = reply.get("suggestions") or []
+        assert clarify, f"clarify empty for '{msg}': {reply}"
+        assert isinstance(suggestions, list) and len(suggestions) >= 1, f"suggestions missing for '{msg}': {reply}"
+        # Should NOT be a metric/revenue dump - reason should be empty
+        assert not reply.get("reason"), f"clarify mode should have empty reason, got: {reply.get('reason')!r}"
+
+
+# -------------- Iteration 2: Concise replies --------------
+def _wc(s):
+    return len((s or "").split())
+
+
+class TestConciseReply:
+    def test_business_today_concise(self, client):
+        r = client.post(f"{API}/ai/chat_once",
+                        json={"message": "How is my business today?"},
+                        timeout=120)
+        assert r.status_code == 200
+        reply = r.json()["reply"]
+        assert _wc(reply.get("status")) <= 10, f"status too long: {reply.get('status')!r}"
+        assert _wc(reply.get("reason")) <= 18, f"reason too long: {reply.get('reason')!r}"
+        opp_wc = _wc(reply.get("opportunity"))
+        assert opp_wc == 0 or opp_wc <= 18, f"opportunity too long: {reply.get('opportunity')!r}"
+        assert _wc(reply.get("action")) <= 10, f"action too long: {reply.get('action')!r}"
+        actions = reply.get("actions") or []
+        assert isinstance(actions, list) and len(actions) <= 3
+        for a in actions:
+            assert a.get("id") and a.get("label") and a.get("kind")
+            if a["kind"] == "campaign":
+                assert a.get("target") == "/marketing", f"campaign action missing /marketing target: {a}"
+                assert isinstance(a.get("prefill"), dict), f"campaign missing prefill: {a}"
+
+
+# -------------- Iteration 2: Data source field --------------
+class TestDataSource:
+    def test_dashboard_has_data_source_mock(self, client):
+        r = client.get(f"{API}/dashboard", timeout=15)
+        assert r.status_code == 200
+        d = r.json()
+        assert "data_source" in d
+        assert d["data_source"] == "mock"
 
 
 class TestVoice:

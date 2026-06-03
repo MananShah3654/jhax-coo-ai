@@ -40,7 +40,8 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 # Local imports (after env loaded so EMERGENT_LLM_KEY is available)
-from mock_data import DATASET  # noqa: E402
+from mock_data import DATASET  # noqa: E402  (kept for backwards compat)
+from data_source import get_source  # noqa: E402
 from analytics import (  # noqa: E402
     today_kpis, daily_briefing, branch_performance, menu_performance,
     customer_intelligence, revenue_breakdown, forecast, operations_snapshot,
@@ -50,6 +51,9 @@ from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
     parse_coo_json,
 )
+from pdf_report import build_report_pdf  # noqa: E402
+
+DS = get_source()
 
 OWNER_PIN = os.environ.get("OWNER_PIN", "1234")
 OWNER_NAME = os.environ.get("OWNER_NAME", "Manan")
@@ -104,7 +108,7 @@ async def auth_pin(req: PinLogin):
     token = uuid.uuid4().hex
     return {
         "token": token,
-        "owner": {"name": OWNER_NAME, "restaurant": DATASET["owner"]["restaurant"]},
+        "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
     }
 
 
@@ -112,11 +116,12 @@ async def auth_pin(req: PinLogin):
 @api.get("/dashboard")
 async def dashboard():
     return {
-        "owner": {"name": OWNER_NAME, "restaurant": DATASET["owner"]["restaurant"]},
+        "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
         "today": today_kpis(),
         "health": health_score(),
         "briefing": daily_briefing(),
         "branches_top3": branch_performance(7)[:3],
+        "data_source": DS.name,
     }
 
 
@@ -268,7 +273,7 @@ async def report(report_type: str):
     ci = customer_intelligence()
     fc = forecast(30)
     body = (
-        f"# {report_type.title()} Report — Jha Bistro\n"
+        f"# {report_type.title()} Report — {DS.owner()['restaurant']}\n"
         f"_Generated {datetime.now(timezone.utc).strftime('%b %d, %Y %H:%M UTC')}_\n\n"
         f"## Today\n"
         f"- Revenue: ${today_k['revenue']:,.2f} ({today_k['vs_yesterday_pct']:+}% vs yesterday)\n"
@@ -289,6 +294,30 @@ async def report(report_type: str):
         + f"- Confidence: {fc['confidence']}%\n"
     )
     return {"type": report_type, "markdown": body}
+
+
+@api.get("/reports/{report_type}/pdf")
+async def report_pdf(report_type: str):
+    valid = {"daily", "weekly", "monthly", "branch", "investor", "marketing"}
+    if report_type not in valid:
+        raise HTTPException(400, f"Unknown report type. Valid: {valid}")
+    pdf = build_report_pdf(
+        report_type=report_type,
+        owner={"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
+        today=today_kpis(),
+        health=health_score(),
+        branches=branch_performance(7),
+        menu=menu_performance(30),
+        customers_summary=customer_intelligence(),
+        forecast_data=forecast(30),
+        briefing=daily_briefing(),
+    )
+    filename = f"jhapay_{report_type}_report.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # -------------------- Wire up --------------------

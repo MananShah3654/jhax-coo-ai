@@ -17,6 +17,7 @@ import Layout from "@/components/Layout";
 import HealthRing from "@/components/HealthRing";
 import KpiTile from "@/components/KpiTile";
 import VoiceMic from "@/components/VoiceMic";
+import { openShareModal } from "@/components/ShareModal";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
@@ -118,31 +119,21 @@ export default function Home() {
         }
     };
 
-    const onLaunch = async () => {
+    const onLaunch = () => {
+        // Open Marketing prefilled with the at-risk reactivation flow
         try {
-            await api.post("/actions/execute", {
-                id: "briefing_launch",
-                kind: "campaign",
-                label: "Daily Briefing — Reactivation Campaign",
-            });
-            toast.success("Reactivation campaign scheduled");
-            navigate("/marketing");
-        } catch {
-            toast.error("Action failed");
-        }
+            sessionStorage.setItem(
+                "campaign_prefill",
+                JSON.stringify({
+                    audience: "at_risk",
+                    channel: "sms",
+                    goal: "Reactivate inactive customers",
+                })
+            );
+        } catch {}
+        navigate("/marketing");
     };
-    const onShare = async () => {
-        try {
-            await api.post("/actions/execute", {
-                id: "briefing_share",
-                kind: "share",
-                label: "Daily Report",
-            });
-            toast.success("Daily report shared via WhatsApp & Email");
-        } catch {
-            toast.error("Action failed");
-        }
-    };
+    const onShare = () => openShareModal("daily");
 
     if (!data)
         return (

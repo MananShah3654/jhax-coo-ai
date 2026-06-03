@@ -167,8 +167,9 @@ export default function Chat() {
                                     reply={m.reply}
                                     streaming={m.streaming}
                                     msgIdx={i}
+                                    onSuggestion={(s) => ask(s)}
                                     onPlayVoice={
-                                        m.streaming
+                                        m.streaming || m.reply.clarify
                                             ? null
                                             : () =>
                                                   playVoice(
@@ -177,7 +178,6 @@ export default function Chat() {
                                                           m.reply.status,
                                                           m.reply.reason,
                                                           m.reply.opportunity,
-                                                          m.reply.action,
                                                       ]
                                                           .filter(Boolean)
                                                           .join(". ")

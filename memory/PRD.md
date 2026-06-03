@@ -37,6 +37,17 @@ Frontend → AI Gateway (/api/ai/chat SSE) → restaurant_context (analytics.py)
 - Layout: sidebar nav (desktop) + bottom nav (mobile), top-right logout (mobile), JhaPay-orange brand identity throughout.
 - Backend tests: 20/20 pytest passing on all /api/* endpoints (auth, dashboard, AI chat, AI streaming SSE, guardrail decline, campaign gen, action execute, reports, STT, TTS).
 
+## Iteration 2 (2026-01)
+- **Concise Decision Card**: AI replies now ≤8 word headline, merged reason+opportunity in one tight paragraph, impact pill, 0-3 action chips. No more verbose 5-section wall.
+- **Clarification gate**: ambiguous inputs ("you", "ok", "hi") no longer trigger metric dumps — the AI returns a clarify question + 3 suggestion chips that re-ask on click.
+- **Real action wiring**:
+  - Launch Campaign → /marketing prefilled (audience/channel/goal flow through sessionStorage + location.state).
+  - Share Report → global ShareModal: live PDF preview + WhatsApp (wa.me) + Email (mailto:) + Download PDF.
+  - Navigate actions → React Router push to the right screen.
+- **Real PDF reports**: `/api/reports/{type}/pdf` for all 6 types (daily/weekly/monthly/branch/investor/marketing) via reportlab, branded JhaPay AI COO™ executive layout.
+- **DataSource adapter**: new `/app/backend/data_source.py` with `MockDataSource` (default) and `JhaPOSDataSource` (HTTP, plug-in via `DATA_SOURCE=jhapos`, `JHAPOS_API_URL`, `JHAPAY_WALLET_API_URL`, `LOYALTY_API_URL`, `JHAPOS_API_KEY` env vars). Falls back per-resource so partial wiring works. `/api/dashboard` now exposes `data_source` field.
+- **Backend tests**: 33/33 pytest pass (12 new tests covering PDF + clarify + concision + adapter).
+
 ## Prioritised Backlog
 **P0**
 - Hook real JhaPOS data via JhaPay Wallet / JhaPOS / Loyalty Engine APIs (replace mock_data.py).

@@ -35,8 +35,10 @@ export default function ShareModal() {
 
     useEffect(() => {
         if (!open) {
-            if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-            setPdfUrl(null);
+            setPdfUrl((prev) => {
+                if (prev) URL.revokeObjectURL(prev);
+                return null;
+            });
             return;
         }
         let cancelled = false;
@@ -45,7 +47,10 @@ export default function ShareModal() {
             .then((r) => r.blob())
             .then((b) => {
                 if (cancelled) return;
-                setPdfUrl(URL.createObjectURL(b));
+                setPdfUrl((prev) => {
+                    if (prev) URL.revokeObjectURL(prev);
+                    return URL.createObjectURL(b);
+                });
             })
             .catch(() => toast.error("Could not generate PDF"))
             .finally(() => !cancelled && setBusy(false));

@@ -1,56 +1,122 @@
-import { useEffect } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
-import { HOME } from "@/constants/testIds";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import Login from "@/screens/Login";
+import Home from "@/screens/Home";
+import Chat from "@/screens/Chat";
+import Branches from "@/screens/Branches";
+import Customers from "@/screens/Customers";
+import Menu from "@/screens/Menu";
+import Marketing from "@/screens/Marketing";
+import Forecast from "@/screens/Forecast";
+import Manager from "@/screens/Manager";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
-
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
-
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          data-testid={HOME.emergentLink}
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
-
-function App() {
-  return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
-  );
+function Protected({ children }) {
+    const { auth } = useAuth();
+    return auth ? children : <Navigate to="/" replace />;
 }
 
-export default App;
+function GuestOnly({ children }) {
+    const { auth } = useAuth();
+    return auth ? <Navigate to="/home" replace /> : children;
+}
+
+function AppRoutes() {
+    return (
+        <Routes>
+            <Route
+                path="/"
+                element={
+                    <GuestOnly>
+                        <Login />
+                    </GuestOnly>
+                }
+            />
+            <Route
+                path="/home"
+                element={
+                    <Protected>
+                        <Home />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/chat"
+                element={
+                    <Protected>
+                        <Chat />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/branches"
+                element={
+                    <Protected>
+                        <Branches />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/customers"
+                element={
+                    <Protected>
+                        <Customers />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/menu"
+                element={
+                    <Protected>
+                        <Menu />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/marketing"
+                element={
+                    <Protected>
+                        <Marketing />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/forecast"
+                element={
+                    <Protected>
+                        <Forecast />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/manager"
+                element={
+                    <Protected>
+                        <Manager />
+                    </Protected>
+                }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+    );
+}
+
+export default function App() {
+    return (
+        <div className="App">
+            <AuthProvider>
+                <BrowserRouter>
+                    <AppRoutes />
+                    <Toaster
+                        position="top-right"
+                        richColors
+                        toastOptions={{
+                            style: { fontFamily: "Manrope, sans-serif" },
+                        }}
+                    />
+                </BrowserRouter>
+            </AuthProvider>
+        </div>
+    );
+}

@@ -26,11 +26,26 @@ function MenuRow({ item }) {
     );
 }
 
+const PERIODS = [
+    { label: "Weekly", days: 7 },
+    { label: "15 Days", days: 15 },
+    { label: "Monthly", days: 30 },
+    { label: "Quarterly", days: 90 },
+];
+
 export default function Menu() {
     const [data, setData] = useState(null);
+    const [days, setDays] = useState(30);
+    const [loading, setLoading] = useState(true);
+
     useEffect(() => {
-        api.get("/menu?days=30").then((r) => setData(r.data));
-    }, []);
+        setLoading(true);
+        api.get(`/menu?days=${days}`).then((r) => {
+            setData(r.data);
+            setLoading(false);
+        });
+    }, [days]);
+
     if (!data)
         return (
             <Layout>
@@ -41,11 +56,33 @@ export default function Menu() {
     return (
         <Layout>
             <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">
-                Menu Intelligence · last 30 days
+                Menu Intelligence · last {days} days
             </div>
             <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-900">
                 What's selling, what's not
             </h1>
+
+            <div className="mt-4 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {PERIODS.map((p) => (
+                    <button
+                        key={p.days}
+                        onClick={() => setDays(p.days)}
+                        className={
+                            "rounded-lg px-4 py-1.5 text-sm font-medium transition " +
+                            (days === p.days
+                                ? "bg-white text-slate-900 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700")
+                        }
+                    >
+                        {p.label}
+                    </button>
+                ))}
+                {loading && (
+                    <span className="self-center px-3 text-xs text-slate-400">
+                        updating…
+                    </span>
+                )}
+            </div>
 
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">

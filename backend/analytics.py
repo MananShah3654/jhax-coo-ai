@@ -15,8 +15,16 @@ from typing import Dict, List
 from data_source import get_source
 
 DS = get_source()
-BRANCHES = DS.branches()
-MENU_ITEMS = DS.menu()
+
+
+# Read branches/menu fresh on every call (not frozen at import) so a live
+# data source with a cache TTL actually surfaces refreshed catalog data.
+def _branches():
+    return DS.branches()
+
+
+def _menu():
+    return DS.menu()
 
 
 def _customers():
@@ -97,7 +105,7 @@ def branch_performance(days: int = 7) -> List[Dict]:
     prev_end = start
     prev_start = prev_end - timedelta(days=days)
     out = []
-    for b in BRANCHES:
+    for b in _branches():
         cur = kpi_window(start, end, b["id"])
         prev = kpi_window(prev_start, prev_end, b["id"])
         growth = 0.0 if not prev["revenue"] else round((cur["revenue"] - prev["revenue"]) / prev["revenue"] * 100, 1)
@@ -117,7 +125,7 @@ def menu_performance(days: int = 30) -> List[Dict]:
             a["revenue"] += it["qty"] * it["price"]
             a["cost"] += it["qty"] * it["cost"]
     out = []
-    for m in MENU_ITEMS:
+    for m in _menu():
         a = agg[m["id"]]
         profit = a["revenue"] - a["cost"]
         margin = (profit / a["revenue"] * 100) if a["revenue"] else 0.0

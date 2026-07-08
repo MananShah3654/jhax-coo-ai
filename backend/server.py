@@ -146,6 +146,31 @@ async def menu(days: int = 30):
     }
 
 
+@api.get("/menu/catalog")
+async def menu_catalog():
+    """Raw integrated menu catalog (live Knowlwood API when DATA_SOURCE=knowlwood).
+
+    Returns the mapped menu items grouped by category so the UI can browse the
+    real catalog, not just performance analytics.
+    """
+    items = DS.menu()
+    by_cat: dict[str, list] = {}
+    for it in items:
+        by_cat.setdefault(it.get("category", "Uncategorized"), []).append(it)
+    categories = getattr(DS, "categories", lambda: [])()
+    return {
+        "data_source": DS.name,
+        "restaurant": DS.owner()["restaurant"],
+        "item_count": len(items),
+        "categories": categories,
+        "items_by_category": [
+            {"category": cat, "items": sorted(its, key=lambda x: x["name"])}
+            for cat, its in sorted(by_cat.items())
+        ],
+        "items": items,
+    }
+
+
 @api.get("/customers")
 async def customers():
     return customer_intelligence()

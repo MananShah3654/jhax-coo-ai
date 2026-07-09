@@ -72,7 +72,36 @@ def _gen_customers(n: int = 240) -> List[Dict]:
     return customers
 
 
-def _gen_orders(customers: List[Dict], days: int = 30) -> List[Dict]:
+def _demand_weight(item: Dict) -> float:
+    """Estimate relative demand for a menu item from its REAL attributes.
+
+    Uses only real menu data (price, featured flag, category) so that
+    simulated order volume is realistic instead of uniform. Cheaper items
+    sell more units; featured items get a lift; everyday categories (burgers,
+    sandwiches, breakfast, sides) outsell niche ones (wine, champagne).
+    This is what makes 'most profitable' vs 'underperforming' meaningful
+    rather than a plain price sort. Real order data (when a token is wired)
+    replaces this entirely.
+    """
+    price = item.get("price") or 1.0
+    # Price elasticity: lower price -> more units (gentle inverse curve).
+    w = 60.0 / (price ** 0.55)
+    if item.get("featured"):
+        w *= 1.7
+    cat = (item.get("category") or "").lower()
+    if any(k in cat for k in ("burger", "sandwich", "breakfast", "side", "kid", "great stuff")):
+        w *= 1.6
+    elif any(k in cat for k in ("salad", "beverage", "goodies", "draft", "bottled")):
+        w *= 1.2
+    elif any(k in cat for k in ("wine", "champagne", "cocktail")):
+        w *= 0.45
+    return max(w, 0.05)
+
+
+def _gen_orders(customers: List[Dict], menu: List[Dict] | None = None,
+                days: int = 30) -> List[Dict]:
+    menu = menu or MENU_ITEMS
+    menu_weights = [_demand_weight(m) for m in menu]
     orders: List[Dict] = []
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     # Branch base volume (orders per day)
@@ -99,7 +128,7 @@ def _gen_orders(customers: List[Dict], days: int = 30) -> List[Dict]:
                 items = []
                 subtotal = 0.0
                 for _ in range(n_items):
-                    m = RNG.choice(MENU_ITEMS)
+                    m = RNG.choices(menu, weights=menu_weights)[0]
                     qty = RNG.choices([1,2,3], weights=[80,15,5])[0]
                     items.append({"menu_id": m["id"], "name": m["name"], "qty": qty,
                                   "price": m["price"], "cost": m["cost"]})
@@ -126,13 +155,25 @@ def _gen_orders(customers: List[Dict], days: int = 30) -> List[Dict]:
     return orders
 
 
-def build_dataset() -> Dict:
+def build_dataset(menu: List[Dict] | None = None,
+                  owner: Dict | None = None) -> Dict:
+    """Build a deterministic dataset.
+
+    Pass `menu` to generate orders against a real menu (e.g. the live
+    Knowlwood catalog) while keeping the seeded branch/customer/order
+    generation. Falls back to the built-in demo menu when omitted.
+    """
+    # Reseed so a caller-supplied menu still yields deterministic output.
+    RNG.seed(42)
+    menu = menu or MENU_ITEMS
     customers = _gen_customers()
-    orders = _gen_orders(customers)
+    # Generate a full quarter of orders so weekly / 15-day / monthly /
+    # quarterly views all have real underlying data.
+    orders = _gen_orders(customers, menu, days=90)
     return {
-        "owner": {"name": "Manan", "restaurant": "Jha Bistro"},
+        "owner": owner or {"name": "Manan", "restaurant": "Jha Bistro"},
         "branches": BRANCHES,
-        "menu": MENU_ITEMS,
+        "menu": menu,
         "customers": customers,
         "orders": orders,
     }

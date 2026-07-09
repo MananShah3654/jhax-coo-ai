@@ -179,6 +179,36 @@ All calls send `Authorization: Bearer {JHAPOS_API_KEY}`.
 
 ---
 
+## 🟩 Plugging in Square sandbox data
+
+`SquareDataSource` (`backend/data_source.py`) calls Square's [Connect REST API](https://developer.squareup.com/reference/square) and maps the responses into the same internal shape the COO expects. Switch to it with one env var.
+
+```bash
+# /app/backend/.env
+DATA_SOURCE=square
+SQUARE_ACCESS_TOKEN=EAAAl...        # Square Developer Dashboard → Credentials → Sandbox
+SQUARE_ENVIRONMENT=sandbox          # "sandbox" or "production"
+```
+
+Get the access token from the **Square Developer Dashboard → your app → Credentials → Sandbox** tab. `SQUARE_ENVIRONMENT` selects the base URL:
+
+- `sandbox` → `https://connect.squareupsandbox.com`
+- `production` → `https://connect.squareup.com`
+
+Like `JhaPOSDataSource`, it falls back to mock data **per resource** if the token is missing or a call fails, so the COO always boots.
+
+| Method | Square endpoint |
+|---|---|
+| `.branches()` | `GET /v2/locations` |
+| `.menu()` | `POST /v2/catalog/search-catalog-items` |
+| `.orders()` | `POST /v2/orders/search` (last 30 days, across `location_ids` from `.branches()`) |
+| `.customers()` | `GET /v2/customers` |
+| `.owner()` | _no Square equivalent — returns mock fallback_ |
+
+All calls send `Authorization: Bearer {SQUARE_ACCESS_TOKEN}`, `Square-Version: <date>`, and (for POST) `Content-Type: application/json`. Money amounts come back in cents and are converted to dollars; food cost isn't provided by Square, so it's estimated by category (same as the Knowlwood adapter).
+
+---
+
 ## 🌐 API reference (high-level)
 
 | Method | Path | What it returns |

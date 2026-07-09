@@ -1,13 +1,22 @@
 """
-JhaPay AI COO - Claude Sonnet 4.5 powered AI brain.
+JhaPay AI COO - free-LLM powered AI brain (OpenAI-compatible API).
 
 Architecture (MCP-style, LLM never touches the DB):
   Frontend → AI Gateway → restaurant_context (via analytics.py) → Prompt
-  Builder → Claude Sonnet 4.5 (streaming) → Response Formatter → UI.
+  Builder → LLM (streaming) → Response Formatter → UI.
 
 The LLM is given a strict system prompt + the structured snapshot for
 the current restaurant. It MUST reply in the executive "Decision Card"
 format: STATUS / REASON / OPPORTUNITY / ACTION / EXPECTED IMPACT.
+
+Provider: any OpenAI-compatible endpoint. Defaults to Groq's FREE tier
+(Llama 3.3 70B + Whisper). Configure via env in backend/.env:
+  LLM_API_KEY   (required)  — free key from https://console.groq.com/keys
+  LLM_API_BASE  (default: https://api.groq.com/openai/v1)
+  LLM_MODEL     (default: llama-3.3-70b-versatile)
+  STT_MODEL     (default: whisper-large-v3-turbo)
+  TTS_MODEL     (default: playai-tts)
+  TTS_VOICE     (default: Fritz-PlayAI)
 """
 from __future__ import annotations
 
@@ -17,16 +26,38 @@ import re
 import uuid
 from typing import AsyncGenerator
 
-from emergentintegrations.llm.chat import (
-    LlmChat, UserMessage, TextDelta, StreamDone,
-)
-from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
+import httpx
 
 from analytics import restaurant_context
 
-EMERGENT_KEY = os.environ["EMERGENT_LLM_KEY"]
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+# ---- Provider config (OpenAI-compatible; default = Groq free tier) ----
+LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1").rstrip("/")
+# Accept a few common env names so any free provider key just works.
+LLM_API_KEY = (
+    os.environ.get("LLM_API_KEY")
+    or os.environ.get("GROQ_API_KEY")
+    or os.environ.get("OPENAI_API_KEY")
+    or ""
+)
+LLM_MODEL = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+STT_MODEL = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
+TTS_MODEL = os.environ.get("TTS_MODEL", "playai-tts")
+TTS_VOICE = os.environ.get("TTS_VOICE", "Fritz-PlayAI")
+
+_TIMEOUT = httpx.Timeout(90.0, connect=10.0)
+
+
+def _require_key() -> None:
+    if not LLM_API_KEY:
+        raise RuntimeError(
+            "LLM_API_KEY is not set — add a FREE key to backend/.env. "
+            "Get one at https://console.groq.com/keys (no credit card)."
+        )
+
+
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
+
 
 SYSTEM_PROMPT = """You are JhaPay AI COO™ — a digital Chief Operating Officer for a restaurant owner.
 You are NOT ChatGPT. You are NOT a general assistant.
@@ -100,14 +131,6 @@ def _wrap_user(text: str) -> str:
     )
 
 
-def _new_chat(session_id: str) -> LlmChat:
-    return LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=session_id,
-        system_message=SYSTEM_PROMPT,
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
-
-
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -141,65 +164,129 @@ def parse_coo_json(text: str) -> dict:
     }
 
 
+async def _raise_for_stream(resp: httpx.Response) -> None:
+    """Read + raise a helpful error when a streaming call returns non-2xx."""
+    if resp.status_code >= 400:
+        body = (await resp.aread()).decode("utf-8", "ignore")
+        raise RuntimeError(f"LLM error {resp.status_code}: {body[:400]}")
+
+
 async def stream_coo_reply(session_id: str, user_text: str) -> AsyncGenerator[str, None]:
-    """Yield raw token strings as Claude generates them (SSE-friendly)."""
-    chat = _new_chat(session_id or str(uuid.uuid4()))
-    msg = UserMessage(text=_wrap_user(user_text))
-    async for ev in chat.stream_message(msg):
-        if isinstance(ev, TextDelta):
-            yield ev.content
-        elif isinstance(ev, StreamDone):
-            break
+    """Yield raw token strings as the model generates them (SSE-friendly).
+
+    Note: each call is stateless (full context is injected every turn), so
+    there is no server-side conversation memory — `session_id` is unused.
+    """
+    _require_key()
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _wrap_user(user_text)},
+        ],
+        "temperature": 0.4,
+        "stream": True,
+        "response_format": {"type": "json_object"},
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with client.stream(
+            "POST", f"{LLM_API_BASE}/chat/completions",
+            headers=_headers(), json=payload,
+        ) as resp:
+            await _raise_for_stream(resp)
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = obj.get("choices") or [{}]
+                delta = (choices[0].get("delta") or {}).get("content")
+                if delta:
+                    yield delta
 
 
 async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
-    """Use Claude to draft a marketing campaign (subject + body + CTA)."""
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"campaign_{uuid.uuid4()}",
-        system_message=(
-            "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
-            "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
-            "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
-            "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
-        ),
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
+    """Draft a marketing campaign (subject + body + CTA) as strict JSON."""
+    _require_key()
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": (
+                "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
+                "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
+                "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
+                "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
+            )},
+            {"role": "user", "content": (
+                f"Draft a {channel} campaign for the audience '{audience}'. "
+                f"The goal is: {goal}. Keep it punchy and action-oriented."
+            )},
+        ],
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"},
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(
+            f"{LLM_API_BASE}/chat/completions", headers=_headers(), json=payload,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"LLM error {r.status_code}: {r.text[:400]}")
+        content = r.json()["choices"][0]["message"]["content"]
 
-    prompt = (
-        f"Draft a {channel} campaign for the audience '{audience}'. "
-        f"The goal is: {goal}. Keep it punchy and action-oriented."
-    )
-    buf = ""
-    async for ev in chat.stream_message(UserMessage(text=prompt)):
-        if isinstance(ev, TextDelta):
-            buf += ev.content
-        elif isinstance(ev, StreamDone):
-            break
-    parsed = parse_coo_json(buf)
+    parsed = parse_coo_json(content)
     if "subject" not in parsed:
-        parsed = {"subject": "Your Jha Bistro Update", "body": buf[:400], "cta": "Order Now",
+        parsed = {"subject": "Your Jha Bistro Update", "body": content[:400], "cta": "Order Now",
                   "estimated_reach": 0, "estimated_revenue": 0}
     return parsed
 
 
-# -------- Voice (Whisper + TTS) --------
-
-def _stt() -> OpenAISpeechToText:
-    return OpenAISpeechToText(api_key=EMERGENT_KEY)
-
-
-def _tts() -> OpenAITextToSpeech:
-    return OpenAITextToSpeech(api_key=EMERGENT_KEY)
-
+# -------- Voice (Whisper STT + TTS) --------
 
 async def transcribe_audio(file_obj) -> str:
-    resp = await _stt().transcribe(file=file_obj, model="whisper-1",
-                                   response_format="json", language="en")
-    return resp.text
+    """Transcribe an uploaded audio file via Whisper (Groq free tier)."""
+    _require_key()
+    name = getattr(file_obj, "name", "audio.webm")
+    data = file_obj.read() if hasattr(file_obj, "read") else bytes(file_obj)
+    files = {"file": (name, data, "application/octet-stream")}
+    form = {"model": STT_MODEL, "response_format": "json", "language": "en"}
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(
+            f"{LLM_API_BASE}/audio/transcriptions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},  # multipart sets its own Content-Type
+            data=form, files=files,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"STT error {r.status_code}: {r.text[:400]}")
+        return r.json().get("text", "")
 
 
 async def synthesize_speech(text: str, voice: str = "nova") -> bytes:
-    # tts-1 is fast and good enough for streaming reply playback
-    return await _tts().generate_speech(
-        text=text[:4000], model="tts-1", voice=voice, response_format="mp3"
-    )
+    """Text-to-speech via the provider's OpenAI-compatible /audio/speech.
+
+    Groq's playai-tts uses its own voice names (e.g. 'Fritz-PlayAI') and may
+    require a one-time terms acceptance in the Groq console. If the incoming
+    voice isn't a provider voice, fall back to TTS_VOICE.
+    """
+    _require_key()
+    v = voice if voice.endswith("-PlayAI") else TTS_VOICE
+    payload = {
+        "model": TTS_MODEL,
+        "input": text[:4000],
+        "voice": v,
+        "response_format": "wav",
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(
+            f"{LLM_API_BASE}/audio/speech", headers=_headers(), json=payload,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"TTS error {r.status_code}: {r.text[:300]}. "
+                "Free TTS may need model terms accepted at console.groq.com."
+            )
+        return r.content

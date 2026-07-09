@@ -14,19 +14,21 @@ from __future__ import annotations
 import json
 import os
 import re
-import uuid
 from typing import AsyncGenerator
 
-from emergentintegrations.llm.chat import (
-    LlmChat, UserMessage, TextDelta, StreamDone,
-)
-from emergentintegrations.llm.openai import OpenAISpeechToText, OpenAITextToSpeech
+from openai import AsyncOpenAI
 
 from analytics import restaurant_context
 
-EMERGENT_KEY = os.environ["EMERGENT_LLM_KEY"]
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
+# LLM config — any OpenAI-compatible endpoint (Groq by default). See backend/.env.
+LLM_API_KEY  = os.environ.get("LLM_API_KEY", "")
+LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
+LLM_MODEL    = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+STT_MODEL    = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
+TTS_MODEL    = os.environ.get("TTS_MODEL", "playai-tts")
+TTS_VOICE    = os.environ.get("TTS_VOICE", "Fritz-PlayAI")
+
+_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_API_BASE)
 
 SYSTEM_PROMPT = """You are JhaPay AI COO™ — a digital Chief Operating Officer for a restaurant owner.
 You are NOT ChatGPT. You are NOT a general assistant.
@@ -100,14 +102,6 @@ def _wrap_user(text: str) -> str:
     )
 
 
-def _new_chat(session_id: str) -> LlmChat:
-    return LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=session_id,
-        system_message=SYSTEM_PROMPT,
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
-
-
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -142,39 +136,43 @@ def parse_coo_json(text: str) -> dict:
 
 
 async def stream_coo_reply(session_id: str, user_text: str) -> AsyncGenerator[str, None]:
-    """Yield raw token strings as Claude generates them (SSE-friendly)."""
-    chat = _new_chat(session_id or str(uuid.uuid4()))
-    msg = UserMessage(text=_wrap_user(user_text))
-    async for ev in chat.stream_message(msg):
-        if isinstance(ev, TextDelta):
-            yield ev.content
-        elif isinstance(ev, StreamDone):
-            break
+    """Yield raw token strings as the model generates them (SSE-friendly)."""
+    stream = await _client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": _wrap_user(user_text)},
+        ],
+        stream=True,
+        temperature=0.3,
+    )
+    async for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
 
 async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
-    """Use Claude to draft a marketing campaign (subject + body + CTA)."""
-    chat = LlmChat(
-        api_key=EMERGENT_KEY,
-        session_id=f"campaign_{uuid.uuid4()}",
-        system_message=(
-            "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
-            "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
-            "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
-            "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
-        ),
-    ).with_model(MODEL_PROVIDER, MODEL_NAME)
-
+    """Draft a marketing campaign (subject + body + CTA)."""
     prompt = (
         f"Draft a {channel} campaign for the audience '{audience}'. "
         f"The goal is: {goal}. Keep it punchy and action-oriented."
     )
-    buf = ""
-    async for ev in chat.stream_message(UserMessage(text=prompt)):
-        if isinstance(ev, TextDelta):
-            buf += ev.content
-        elif isinstance(ev, StreamDone):
-            break
+    resp = await _client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": (
+                "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
+                "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
+                "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
+                "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
+            )},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.7,
+    )
+    buf = resp.choices[0].message.content or ""
     parsed = parse_coo_json(buf)
     if "subject" not in parsed:
         parsed = {"subject": "Your Jha Bistro Update", "body": buf[:400], "cta": "Order Now",
@@ -182,24 +180,22 @@ async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
     return parsed
 
 
-# -------- Voice (Whisper + TTS) --------
-
-def _stt() -> OpenAISpeechToText:
-    return OpenAISpeechToText(api_key=EMERGENT_KEY)
-
-
-def _tts() -> OpenAITextToSpeech:
-    return OpenAITextToSpeech(api_key=EMERGENT_KEY)
-
+# -------- Voice (Groq Whisper STT + TTS) --------
 
 async def transcribe_audio(file_obj) -> str:
-    resp = await _stt().transcribe(file=file_obj, model="whisper-1",
-                                   response_format="json", language="en")
+    resp = await _client.audio.transcriptions.create(
+        model=STT_MODEL, file=file_obj, response_format="json", language="en"
+    )
     return resp.text
 
 
-async def synthesize_speech(text: str, voice: str = "nova") -> bytes:
-    # tts-1 is fast and good enough for streaming reply playback
-    return await _tts().generate_speech(
-        text=text[:4000], model="tts-1", voice=voice, response_format="mp3"
+async def synthesize_speech(text: str, voice: str | None = None) -> bytes:
+    # Groq TTS uses its own voices (e.g. Fritz-PlayAI); OpenAI voice names aren't valid,
+    # so we always use TTS_VOICE from env and ignore the incoming `voice`.
+    resp = await _client.audio.speech.create(
+        model=TTS_MODEL,
+        voice=TTS_VOICE,
+        input=text[:4000],
+        response_format="mp3",
     )
+    return resp.read()

@@ -110,6 +110,40 @@ class JhaPOSDataSource:
         return self._cache["owner"]  # type: ignore[return-value]
 
 
+# ---------- Postgres (persistent store — used when DATA_SOURCE=postgres) ----------
+class PostgresDataSource:
+    """Reads the same shapes as MockDataSource, but from PostgreSQL.
+    Seed it first with `python seed_db.py`."""
+
+    name = "postgres"
+
+    def branches(self) -> List[Dict]:
+        from db import Branch, SessionLocal
+        with SessionLocal() as s:
+            return [b.to_dict() for b in s.query(Branch).all()]
+
+    def menu(self) -> List[Dict]:
+        from db import MenuItem, SessionLocal
+        with SessionLocal() as s:
+            return [m.to_dict() for m in s.query(MenuItem).all()]
+
+    def customers(self) -> List[Dict]:
+        from db import Customer, SessionLocal
+        with SessionLocal() as s:
+            return [c.to_dict() for c in s.query(Customer).all()]
+
+    def orders(self) -> List[Dict]:
+        from db import Order, SessionLocal
+        with SessionLocal() as s:
+            return [o.to_dict() for o in s.query(Order).all()]
+
+    def owner(self) -> Dict:
+        from db import Owner, SessionLocal
+        with SessionLocal() as s:
+            row = s.query(Owner).first()
+            return row.to_dict() if row else MockDataSource().owner()
+
+
 # ---------- Factory ----------
 _SOURCE: object | None = None
 
@@ -121,6 +155,9 @@ def get_source():
         if which == "jhapos":
             logger.info("Using JhaPOS live data source")
             _SOURCE = JhaPOSDataSource()
+        elif which == "postgres":
+            logger.info("Using PostgreSQL data source")
+            _SOURCE = PostgresDataSource()
         else:
             logger.info("Using mock data source")
             _SOURCE = MockDataSource()

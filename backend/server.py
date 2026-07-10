@@ -57,6 +57,7 @@ from database import (  # noqa: E402
     User, get_db, init_db, set_user_pin, verify_user_pin,
 )
 from auth import get_current_user  # noqa: E402
+from twilio_auth import router as twilio_auth_router  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 DS = get_source()
@@ -470,6 +471,7 @@ async def _on_startup():
 
 
 app.include_router(api)
+app.include_router(twilio_auth_router)  # /api/auth/send-otp, /api/auth/verify-otp
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

@@ -6,7 +6,7 @@ import {
     firebaseEnabled,
     emailSignIn,
     emailRegister,
-    phoneSendOtp,
+    customTokenSignIn,
     firebaseSignOut,
 } from "@/lib/firebase";
 
@@ -84,10 +84,20 @@ export function AuthProvider({ children }) {
         setUnlocked(true);
         return res;
     };
-    const sendPhoneOtp = (e164Phone) => phoneSendOtp(e164Phone);
-    const confirmPhone = async (confirmation, code) => {
+    // Phone OTP via Twilio Verify (backend), then finish with a Firebase custom
+    // token. Same freshLoginRef + setUnlocked handshake as email login, so the
+    // React Router auth-flow gate triggers identically after phone login.
+    const sendPhoneOtp = async (e164Phone) => {
+        const { data } = await api.post("/auth/send-otp", { phone_number: e164Phone });
+        return data; // { status, to }
+    };
+    const verifyPhoneOtp = async (e164Phone, code) => {
         freshLoginRef.current = true;
-        const res = await confirmation.confirm(code);
+        const { data } = await api.post("/auth/verify-otp", {
+            phone_number: e164Phone,
+            code,
+        });
+        const res = await customTokenSignIn(data.token);
         setUnlocked(true);
         return res;
     };
@@ -171,7 +181,7 @@ export function AuthProvider({ children }) {
                 loginWithEmail,
                 registerWithEmail,
                 sendPhoneOtp,
-                confirmPhone,
+                verifyPhoneOtp,
                 setPin,
                 verifyPin,
                 forgotPin,

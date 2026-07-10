@@ -6,10 +6,9 @@
 import { initializeApp } from "firebase/app";
 import {
     getAuth,
-    RecaptchaVerifier,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
-    signInWithPhoneNumber,
+    signInWithCustomToken,
     signOut,
 } from "firebase/auth";
 
@@ -45,20 +44,11 @@ export const emailSignIn = (email, password) =>
 export const emailRegister = (email, password) =>
     createUserWithEmailAndPassword(auth, email, password);
 
-// --- Phone (OTP) ---
-// Firebase requires a reCAPTCHA verifier anchored to a DOM node for phone auth.
-// We keep a single invisible verifier per page load.
-let recaptcha = null;
-export function getRecaptcha(containerId = "recaptcha-container") {
-    if (!auth) throw new Error("Firebase is not configured");
-    if (!recaptcha) {
-        recaptcha = new RecaptchaVerifier(auth, containerId, { size: "invisible" });
-    }
-    return recaptcha;
-}
-
-// Send an OTP SMS; returns a confirmationResult with .confirm(code).
-export const phoneSendOtp = (e164Phone, containerId) =>
-    signInWithPhoneNumber(auth, e164Phone, getRecaptcha(containerId));
+// --- Phone (OTP via Twilio Verify) ---
+// Firebase's built-in Phone Auth is replaced by Twilio (see backend
+// twilio_auth.py). The backend verifies the SMS code and returns a Firebase
+// *custom token*; we complete the session here with signInWithCustomToken so the
+// rest of the app sees a normal Firebase user (ID token, /me, onboarding, PIN).
+export const customTokenSignIn = (token) => signInWithCustomToken(auth, token);
 
 export const firebaseSignOut = () => (auth ? signOut(auth) : Promise.resolve());

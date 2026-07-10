@@ -1,0 +1,32 @@
+# Local PostgreSQL for JhaPay AI COO.
+#
+#   docker compose up -d        # start Postgres in the background
+#   docker compose ps           # check status / health
+#   docker compose logs -f db   # tail logs
+#   docker compose down         # stop (data is kept in the named volume)
+#   docker compose down -v      # stop AND wipe the database volume
+#
+# Matches DATABASE_URL in .env:
+#   postgresql://postgres:postgres@localhost:5433/jhax_coo
+services:
+  db:
+    image: postgres:16
+    container_name: jhax-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: jhax_coo
+    ports:
+      # host 5433 -> container 5432 (5433 avoids clashing with a local 5432)
+      - "5433:5432"
+    volumes:
+      - jhax_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jhax_coo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  jhax_pg_data:

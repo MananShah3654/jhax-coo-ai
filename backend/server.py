@@ -16,6 +16,7 @@ Endpoints (all under /api):
   POST /ai/transcribe             - audio -> text (Whisper)
   POST /ai/tts                    - text -> audio (OpenAI TTS)
   POST /campaigns/generate        - AI-drafted campaign
+  POST /campaigns/image           - AI promotional banner (free text-to-image)
   POST /actions/execute           - execute one-click actions (mocked: SMS/Email/...)
   GET  /reports/{type}            - generate text report (markdown)
 """
@@ -31,7 +32,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
@@ -39,7 +40,7 @@ from starlette.middleware.cors import CORSMiddleware
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-# Local imports (after env loaded so EMERGENT_LLM_KEY is available)
+# Local imports (after env loaded so LLM_API_KEY is available)
 from mock_data import DATASET  # noqa: E402  (kept for backwards compat)
 from data_source import get_source  # noqa: E402
 from analytics import (  # noqa: E402
@@ -49,9 +50,14 @@ from analytics import (  # noqa: E402
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
-    parse_coo_json,
+    build_campaign_image, parse_coo_json,
 )
 from pdf_report import build_report_pdf  # noqa: E402
+from database import (  # noqa: E402
+    User, get_db, init_db, set_user_pin, verify_user_pin,
+)
+from auth import get_current_user  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
 
 DS = get_source()
 
@@ -82,6 +88,12 @@ class CampaignRequest(BaseModel):
     goal: str
 
 
+class CampaignImageRequest(BaseModel):
+    description: str
+    style: str | None = "photorealistic"
+    seed: int | None = None
+
+
 class TTSRequest(BaseModel):
     text: str
     voice: str = "nova"
@@ -93,6 +105,30 @@ class ActionRequest(BaseModel):
     label: str | None = None
     target: str | None = None
     payload: dict | None = None
+
+
+class ProfileUpdate(BaseModel):
+    """Onboarding / profile fields the Firebase token doesn't carry.
+
+    A phone-login token has no email/name; an email-login token has no phone.
+    The client fills the gaps here after first sign-in. All fields optional so
+    the same endpoint supports partial edits later.
+    """
+    name: str | None = None
+    restaurant_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+
+
+class PinBody(BaseModel):
+    pin: str
+
+
+def _validate_pin(pin: str) -> str:
+    pin = (pin or "").strip()
+    if not (pin.isdigit() and len(pin) == 4):
+        raise HTTPException(400, "PIN must be exactly 4 digits.")
+    return pin
 
 
 # -------------------- Health / Auth --------------------
@@ -110,6 +146,67 @@ async def auth_pin(req: PinLogin):
         "token": token,
         "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
     }
+
+
+@api.get("/me")
+async def me(user: User = Depends(get_current_user)):
+    """Return the current Firebase-authenticated user (created on first call).
+
+    Send `Authorization: Bearer <firebase_id_token>`. The token is verified with
+    the Firebase Admin SDK and the user is looked up / created in Postgres.
+    Works for both email and phone sign-in — the backend just verifies the token.
+    """
+    return user.as_dict()
+
+
+@api.patch("/me")
+async def update_me(
+    req: ProfileUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fill in / edit profile fields the Firebase token doesn't provide.
+
+    Used during onboarding: e.g. a phone-login user supplies name, email and
+    restaurant_name here. Only fields sent in the body are changed.
+    """
+    for field, value in req.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user.as_dict()
+
+
+@api.post("/me/pin")
+async def set_pin(
+    req: PinBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create or replace the current user's quick-unlock PIN (hashed)."""
+    pin = _validate_pin(req.pin)
+    set_user_pin(db, user, pin)
+    return {"ok": True, "has_pin": True}
+
+
+@api.post("/me/pin/verify")
+async def verify_pin(
+    req: PinBody,
+    user: User = Depends(get_current_user),
+):
+    """Verify a PIN for quick unlock.
+
+    Requires a valid Firebase token (get_current_user) — so this only works
+    while the device's session/refresh token is still valid. Status codes:
+      401  token missing/expired (from get_current_user) → client does full login
+      400  no PIN set for this user
+      403  wrong PIN
+    """
+    if not user.pin_hash:
+        raise HTTPException(400, "No PIN set for this account.")
+    if not verify_user_pin(user, req.pin):
+        raise HTTPException(403, "Incorrect PIN.")
+    return {"ok": True}
 
 
 # -------------------- Dashboard / Briefing --------------------
@@ -262,6 +359,20 @@ async def campaigns_generate(req: CampaignRequest):
     return {"audience": req.audience, "channel": req.channel, "goal": req.goal, "draft": draft}
 
 
+@api.post("/campaigns/image")
+async def campaigns_image(req: CampaignImageRequest):
+    """Generate a promotional banner from a text description (free Pollinations)."""
+    if not req.description or not req.description.strip():
+        raise HTTPException(400, "Describe the banner you'd like.")
+    try:
+        return await build_campaign_image(
+            req.description, req.style or "photorealistic", seed=req.seed
+        )
+    except Exception as e:
+        logger.exception("Banner generation error")
+        raise HTTPException(500, f"Banner generation failed: {e}")
+
+
 @api.post("/actions/execute")
 async def execute_action(req: ActionRequest):
     # All side-effect actions are mocked - in production they'd hit JhaPay SMS/Email/Push.
@@ -346,6 +457,18 @@ async def report_pdf(report_type: str):
 
 
 # -------------------- Wire up --------------------
+@app.on_event("startup")
+async def _on_startup():
+    """Create Postgres tables (idempotent) on boot."""
+    try:
+        init_db()
+        logger.info("Database initialized (tables ensured).")
+    except Exception:
+        # Don't crash the whole API if Postgres is momentarily unavailable;
+        # DB-backed routes will surface the error per-request instead.
+        logger.exception("Database init failed at startup")
+
+
 app.include_router(api)
 app.add_middleware(
     CORSMiddleware,

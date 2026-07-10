@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import Layout from "@/components/Layout";
-import { Sparkles, Loader2, Send } from "lucide-react";
+import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
@@ -33,6 +33,12 @@ export default function Marketing() {
     const [goal, setGoal] = useState(GOALS[0]);
     const [draft, setDraft] = useState(null);
     const [busy, setBusy] = useState(false);
+
+    // Promotional banner (AI text-to-image)
+    const [bannerDesc, setBannerDesc] = useState("");
+    const [banner, setBanner] = useState(null); // {url, prompt, seed}
+    const [bannerBusy, setBannerBusy] = useState(false);
+    const [imgLoading, setImgLoading] = useState(false);
 
     // Pick up prefill from /home → Launch Campaign or from an AI action button
     useEffect(() => {
@@ -84,6 +90,28 @@ export default function Marketing() {
             toast.success("Campaign scheduled for delivery");
         } catch {
             toast.error("Launch failed");
+        }
+    };
+
+    const generateBanner = async (regenerate = false) => {
+        const description = (bannerDesc.trim() || goal).trim();
+        if (!description) {
+            toast.error("Describe the banner you'd like");
+            return;
+        }
+        setBannerBusy(true);
+        try {
+            const { data } = await api.post("/campaigns/image", {
+                description,
+                // New random seed on regenerate → a fresh variant of the same idea.
+                seed: regenerate ? Math.floor(Math.random() * 1_000_000) : undefined,
+            });
+            setImgLoading(true);
+            setBanner(data);
+        } catch {
+            toast.error("Banner generation failed");
+        } finally {
+            setBannerBusy(false);
         }
     };
 
@@ -244,6 +272,101 @@ export default function Marketing() {
                             </button>
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Promotional banner (AI image) */}
+            <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-6">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-[#FF6B35]">
+                    <ImageIcon size={13} /> Promotional Banner
+                </div>
+                <h2 className="mt-1 font-display text-xl font-semibold text-slate-900">
+                    Describe it — the AI designs the banner
+                </h2>
+
+                <div className="mt-4 grid items-start gap-6 lg:grid-cols-[1fr_1fr]">
+                    <div>
+                        <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                            What should the banner show?
+                        </label>
+                        <textarea
+                            data-testid={TID.campBannerDesc}
+                            value={bannerDesc}
+                            onChange={(e) => setBannerDesc(e.target.value)}
+                            rows={3}
+                            placeholder={`e.g. "Sizzling BBQ ribs platter with truffle fries on a rustic wooden table" — leave empty to use the goal: "${goal}"`}
+                            className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm focus:border-[#FF6B35] focus:outline-none focus:ring-4 focus:ring-orange-100"
+                        />
+                        <button
+                            data-testid={TID.campBannerGenerate}
+                            onClick={() => generateBanner(false)}
+                            disabled={bannerBusy}
+                            className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#FF6B35] px-6 py-2.5 text-sm font-medium text-white shadow-[0_4px_14px_rgba(255,107,53,0.4)] transition-all hover:bg-[#E85D2A] disabled:opacity-50"
+                        >
+                            {bannerBusy ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <ImageIcon size={14} />
+                            )}
+                            {bannerBusy ? "Designing…" : "Generate Banner"}
+                        </button>
+                    </div>
+
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                        {!banner && !bannerBusy && (
+                            <div
+                                className="grid place-items-center text-center text-sm text-slate-400"
+                                style={{ aspectRatio: "1200 / 628" }}
+                            >
+                                Your banner preview will appear here.
+                            </div>
+                        )}
+                        {(bannerBusy || (banner && imgLoading)) && (
+                            <div
+                                className="grid place-items-center bg-slate-100 text-sm text-slate-400"
+                                style={{ aspectRatio: "1200 / 628" }}
+                            >
+                                <div className="flex items-center gap-2">
+                                    <Loader2 size={14} className="animate-spin text-[#FF6B35]" />
+                                    Rendering banner…
+                                </div>
+                            </div>
+                        )}
+                        {banner && (
+                            <img
+                                data-testid={TID.campBannerImg}
+                                src={banner.url}
+                                alt="AI-generated promotional banner"
+                                onLoad={() => setImgLoading(false)}
+                                onError={() => {
+                                    setImgLoading(false);
+                                    toast.error("Banner image failed to load");
+                                }}
+                                className={`w-full ${imgLoading ? "hidden" : "block"}`}
+                                style={{ aspectRatio: "1200 / 628", objectFit: "cover" }}
+                            />
+                        )}
+                        {banner && !imgLoading && (
+                            <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white px-4 py-3">
+                                <button
+                                    data-testid={TID.campBannerRegenerate}
+                                    onClick={() => generateBanner(true)}
+                                    disabled={bannerBusy}
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A] disabled:opacity-50"
+                                >
+                                    <RefreshCw size={13} /> Regenerate
+                                </button>
+                                <a
+                                    href={banner.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
+                                >
+                                    <Download size={13} /> Open full size
+                                </a>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </Layout>

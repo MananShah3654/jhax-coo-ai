@@ -7,6 +7,35 @@ export const TID = {
     pinError: "pin-error",
     pinLogout: "logout-btn",
 
+    // Auth — Firebase email/phone login
+    authTabEmail: "auth-tab-email",
+    authTabPhone: "auth-tab-phone",
+    authTabPin: "auth-tab-pin",
+    authEmailInput: "auth-email-input",
+    authPasswordInput: "auth-password-input",
+    authEmailSubmit: "auth-email-submit",
+    authRegisterToggle: "auth-register-toggle",
+    authPhoneInput: "auth-phone-input",
+    authPhoneSendOtp: "auth-phone-send-otp",
+    authOtpInput: "auth-otp-input",
+    authOtpVerify: "auth-otp-verify",
+    authError: "auth-error",
+
+    // Auth — onboarding (fill profile after first sign-in)
+    onboardName: "onboard-name-input",
+    onboardRestaurant: "onboard-restaurant-input",
+    onboardContact: "onboard-contact-input",
+    onboardSubmit: "onboard-submit",
+
+    // Auth — PIN quick-unlock
+    setPinDigit: (d) => `set-pin-digit-${d}`,
+    setPinContinue: "set-pin-continue",
+    setPinError: "set-pin-error",
+    unlockDigit: (d) => `unlock-digit-${d}`,
+    unlockSubmit: "unlock-submit",
+    unlockError: "unlock-error",
+    unlockForgot: "unlock-forgot",
+
     // Layout
     navHome: "nav-home",
     navChat: "nav-chat",
@@ -53,4 +82,8 @@ export const TID = {
     campGoal: "camp-goal",
     campGenerate: "camp-generate",
     campResult: "camp-result",
+    campBannerDesc: "camp-banner-desc",
+    campBannerGenerate: "camp-banner-generate",
+    campBannerImg: "camp-banner-img",
+    campBannerRegenerate: "camp-banner-regenerate",
 };

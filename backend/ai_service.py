@@ -20,11 +20,13 @@ Provider: any OpenAI-compatible endpoint. Defaults to Groq's FREE tier
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import uuid
 from typing import AsyncGenerator
+from urllib.parse import quote
 
 import httpx
 
@@ -243,6 +245,82 @@ async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
         parsed = {"subject": "Your Jha Bistro Update", "body": content[:400], "cta": "Order Now",
                   "estimated_reach": 0, "estimated_revenue": 0}
     return parsed
+
+
+# -------- Promotional banner (free text-to-image) --------
+
+# Pollinations.ai serves text-to-image over a plain GET URL — no key, no cost.
+# We return the URL and let the browser <img> load it directly (no proxying).
+IMG_BASE = os.environ.get("IMG_API_BASE", "https://image.pollinations.ai/prompt").rstrip("/")
+IMG_MODEL = os.environ.get("IMG_MODEL", "flux")
+
+
+async def _enhance_image_prompt(description: str, style: str) -> str:
+    """Turn the owner's short description into a vivid banner prompt.
+
+    Best-effort: uses the LLM when a key is present, otherwise falls back to a
+    solid template so banner generation never hard-fails on the copy step.
+    """
+    base = (
+        f"Professional food-marketing banner for 'Jha Bistro', a casual upscale "
+        f"bistro. {description.strip()}. {style}, appetizing, vibrant, warm "
+        f"lighting, shallow depth of field, high detail, clean composition with "
+        f"empty space for a headline, no text, no watermark, no logo."
+    )
+    if not LLM_API_KEY:
+        return base
+    try:
+        payload = {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": (
+                    "You write concise text-to-image prompts for restaurant "
+                    "promotional banners. Reply with ONE prompt, max 55 words, "
+                    "vivid and photographic. Always end with: 'clean composition "
+                    "with empty space for a headline, no text, no watermark'. "
+                    "No preamble, no quotes."
+                )},
+                {"role": "user", "content": (
+                    f"Banner for 'Jha Bistro'. Owner's idea: {description.strip()}. "
+                    f"Preferred style: {style}."
+                )},
+            ],
+            "temperature": 0.8,
+            "max_tokens": 160,
+        }
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(
+                f"{LLM_API_BASE}/chat/completions", headers=_headers(), json=payload,
+            )
+            if r.status_code >= 400:
+                return base
+            txt = (r.json()["choices"][0]["message"]["content"] or "").strip()
+            return txt or base
+    except Exception:
+        return base
+
+
+async def build_campaign_image(
+    description: str,
+    style: str = "photorealistic",
+    width: int = 1200,
+    height: int = 628,
+    seed: int | None = None,
+) -> dict:
+    """Build a promotional banner image URL from a text description.
+
+    Returns {url, prompt, seed}. Default size is a social-banner ratio (1200×628).
+    `seed` makes results reproducible; pass a new seed to regenerate a variant.
+    """
+    prompt = await _enhance_image_prompt(description, style)
+    if seed is None:
+        seed = int(hashlib.sha256(prompt.encode("utf-8")).hexdigest(), 16) % 1_000_000
+    encoded = quote(prompt, safe="")
+    url = (
+        f"{IMG_BASE}/{encoded}"
+        f"?width={width}&height={height}&nologo=true&model={IMG_MODEL}&seed={seed}"
+    )
+    return {"url": url, "prompt": prompt, "seed": seed}
 
 
 # -------- Voice (Whisper STT + TTS) --------

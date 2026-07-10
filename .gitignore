@@ -86,3 +86,8 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Firebase service-account keys (backend FIREBASE_CREDENTIALS) — never commit
+*serviceAccount*.json
+*firebase-adminsdk*.json
+firebase-key.json

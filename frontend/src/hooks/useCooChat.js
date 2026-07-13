@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { API } from "@/lib/api";
+import { API, authHeader } from "@/lib/api";
 
 /**
  * Hook that streams the AI COO reply from /api/ai/chat (SSE).
@@ -79,9 +79,12 @@ export function useCooChat(initialSession = null) {
             const ctrl = new AbortController();
             abortRef.current = ctrl;
             try {
+                // /ai/chat is a protected route; attach the Firebase token
+                // (raw fetch bypasses the axios interceptor in lib/api).
+                const auth = await authHeader();
                 const res = await fetch(`${API}/ai/chat`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Content-Type": "application/json", ...auth },
                     body: JSON.stringify({
                         session_id: sessionId,
                         message: text,

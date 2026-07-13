@@ -59,10 +59,8 @@ from database import (  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-DS = get_source()
-
-OWNER_PIN = os.environ.get("OWNER_PIN", "1234")
-OWNER_NAME = os.environ.get("OWNER_NAME", "Manan")
+# No module-global data source anymore: each request builds an owner-scoped
+# source via get_source(user.id). See data_source.get_source.
 
 app = FastAPI(title="JhaPay AI COO API")
 api = APIRouter(prefix="/api")
@@ -73,10 +71,6 @@ logger = logging.getLogger("jhapay")
 
 
 # -------------------- Schemas --------------------
-class PinLogin(BaseModel):
-    pin: str
-
-
 class ChatRequest(BaseModel):
     session_id: str | None = None
     message: str
@@ -135,17 +129,6 @@ def _validate_pin(pin: str) -> str:
 @api.get("/")
 async def root():
     return {"service": "JhaPay AI COO", "version": "1.0", "ok": True}
-
-
-@api.post("/auth/pin")
-async def auth_pin(req: PinLogin):
-    if req.pin != OWNER_PIN:
-        raise HTTPException(status_code=401, detail="Invalid PIN")
-    token = uuid.uuid4().hex
-    return {
-        "token": token,
-        "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
-    }
 
 
 @api.get("/me")
@@ -211,30 +194,31 @@ async def verify_pin(
 
 # -------------------- Dashboard / Briefing --------------------
 @api.get("/dashboard")
-async def dashboard():
+async def dashboard(user: User = Depends(get_current_user)):
+    src = get_source(user.id)
     return {
-        "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
-        "today": today_kpis(),
-        "health": health_score(),
-        "briefing": daily_briefing(),
-        "branches_top3": branch_performance(7)[:3],
-        "data_source": DS.name,
+        "owner": {"name": user.name, "restaurant": user.restaurant_name},
+        "today": today_kpis(src),
+        "health": health_score(src),
+        "briefing": daily_briefing(src),
+        "branches_top3": branch_performance(src, 7)[:3],
+        "data_source": src.name,
     }
 
 
 @api.get("/briefing")
-async def briefing():
-    return daily_briefing()
+async def briefing(user: User = Depends(get_current_user)):
+    return daily_briefing(get_source(user.id))
 
 
 @api.get("/branches")
-async def branches(days: int = 7):
-    return {"days": days, "branches": branch_performance(days)}
+async def branches(days: int = 7, user: User = Depends(get_current_user)):
+    return {"days": days, "branches": branch_performance(get_source(user.id), days)}
 
 
 @api.get("/menu")
-async def menu(days: int = 30):
-    perf = menu_performance(days)
+async def menu(days: int = 30, user: User = Depends(get_current_user)):
+    perf = menu_performance(get_source(user.id), days)
     return {
         "days": days,
         "top": perf[:5],
@@ -244,20 +228,19 @@ async def menu(days: int = 30):
 
 
 @api.get("/menu/catalog")
-async def menu_catalog():
-    """Raw integrated menu catalog (live Knowlwood API when DATA_SOURCE=knowlwood).
-
-    Returns the mapped menu items grouped by category so the UI can browse the
-    real catalog, not just performance analytics.
+async def menu_catalog(user: User = Depends(get_current_user)):
+    """Raw integrated menu catalog grouped by category so the UI can browse the
+    owner's menu, not just performance analytics.
     """
-    items = DS.menu()
+    src = get_source(user.id)
+    items = src.menu()
     by_cat: dict[str, list] = {}
     for it in items:
         by_cat.setdefault(it.get("category", "Uncategorized"), []).append(it)
-    categories = getattr(DS, "categories", lambda: [])()
+    categories = getattr(src, "categories", lambda: [])()
     return {
-        "data_source": DS.name,
-        "restaurant": DS.owner()["restaurant"],
+        "data_source": src.name,
+        "restaurant": user.restaurant_name,
         "item_count": len(items),
         "categories": categories,
         "items_by_category": [
@@ -269,35 +252,36 @@ async def menu_catalog():
 
 
 @api.get("/customers")
-async def customers():
-    return customer_intelligence()
+async def customers(user: User = Depends(get_current_user)):
+    return customer_intelligence(get_source(user.id))
 
 
 @api.get("/revenue")
-async def revenue(days: int = 30):
-    return {"days": days, **revenue_breakdown(days)}
+async def revenue(days: int = 30, user: User = Depends(get_current_user)):
+    return {"days": days, **revenue_breakdown(get_source(user.id), days)}
 
 
 @api.get("/forecast")
-async def get_forecast(days: int = 30):
-    return forecast(days)
+async def get_forecast(days: int = 30, user: User = Depends(get_current_user)):
+    return forecast(get_source(user.id), days)
 
 
 @api.get("/operations")
-async def operations():
-    return operations_snapshot()
+async def operations(user: User = Depends(get_current_user)):
+    return operations_snapshot(get_source(user.id))
 
 
 # -------------------- AI Chat (streaming SSE) --------------------
 @api.post("/ai/chat")
-async def ai_chat(req: ChatRequest):
+async def ai_chat(req: ChatRequest, user: User = Depends(get_current_user)):
     session_id = req.session_id or uuid.uuid4().hex
+    src = get_source(user.id)
 
     async def event_gen():
         # Emit session id first
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
         try:
-            async for chunk in stream_coo_reply(session_id, req.message):
+            async for chunk in stream_coo_reply(session_id, req.message, src):
                 if chunk:
                     yield f"event: delta\ndata: {json.dumps({'text': chunk})}\n\n"
             yield "event: done\ndata: {}\n\n"
@@ -315,10 +299,11 @@ async def ai_chat(req: ChatRequest):
 
 # Non-stream fallback for tests / quick replies
 @api.post("/ai/chat_once")
-async def ai_chat_once(req: ChatRequest):
+async def ai_chat_once(req: ChatRequest, user: User = Depends(get_current_user)):
     session_id = req.session_id or uuid.uuid4().hex
+    src = get_source(user.id)
     buf = ""
-    async for chunk in stream_coo_reply(session_id, req.message):
+    async for chunk in stream_coo_reply(session_id, req.message, src):
         buf += chunk
     parsed = parse_coo_json(buf)
     return {"session_id": session_id, "reply": parsed, "raw": buf}
@@ -326,7 +311,9 @@ async def ai_chat_once(req: ChatRequest):
 
 # -------------------- Voice --------------------
 @api.post("/ai/transcribe")
-async def ai_transcribe(file: UploadFile = File(...)):
+async def ai_transcribe(
+    file: UploadFile = File(...), user: User = Depends(get_current_user)
+):
     data = await file.read()
     if not data:
         raise HTTPException(400, "Empty audio")
@@ -343,7 +330,7 @@ async def ai_transcribe(file: UploadFile = File(...)):
 
 
 @api.post("/ai/tts")
-async def ai_tts(req: TTSRequest):
+async def ai_tts(req: TTSRequest, user: User = Depends(get_current_user)):
     try:
         audio = await synthesize_speech(req.text, voice=req.voice)
     except Exception as e:
@@ -354,13 +341,17 @@ async def ai_tts(req: TTSRequest):
 
 # -------------------- Campaigns / Actions / Reports --------------------
 @api.post("/campaigns/generate")
-async def campaigns_generate(req: CampaignRequest):
+async def campaigns_generate(
+    req: CampaignRequest, user: User = Depends(get_current_user)
+):
     draft = await generate_campaign(req.audience, req.channel, req.goal)
     return {"audience": req.audience, "channel": req.channel, "goal": req.goal, "draft": draft}
 
 
 @api.post("/campaigns/image")
-async def campaigns_image(req: CampaignImageRequest):
+async def campaigns_image(
+    req: CampaignImageRequest, user: User = Depends(get_current_user)
+):
     """Generate a promotional banner from a text description (free Pollinations)."""
     if not req.description or not req.description.strip():
         raise HTTPException(400, "Describe the banner you'd like.")
@@ -374,7 +365,7 @@ async def campaigns_image(req: CampaignImageRequest):
 
 
 @api.post("/actions/execute")
-async def execute_action(req: ActionRequest):
+async def execute_action(req: ActionRequest, user: User = Depends(get_current_user)):
     # All side-effect actions are mocked - in production they'd hit JhaPay SMS/Email/Push.
     now = datetime.now(timezone.utc).isoformat()
     kind = req.kind
@@ -398,18 +389,19 @@ async def execute_action(req: ActionRequest):
 
 
 @api.get("/reports/{report_type}")
-async def report(report_type: str):
+async def report(report_type: str, user: User = Depends(get_current_user)):
     valid = {"daily", "weekly", "monthly", "branch", "investor", "marketing"}
     if report_type not in valid:
         raise HTTPException(400, f"Unknown report type. Valid: {valid}")
-    today_k = today_kpis()
-    health = health_score()
-    branches = branch_performance(7)
-    menu = menu_performance(30)
-    ci = customer_intelligence()
-    fc = forecast(30)
+    src = get_source(user.id)
+    today_k = today_kpis(src)
+    health = health_score(src)
+    branches = branch_performance(src, 7)
+    menu = menu_performance(src, 30)
+    ci = customer_intelligence(src)
+    fc = forecast(src, 30)
     body = (
-        f"# {report_type.title()} Report — {DS.owner()['restaurant']}\n"
+        f"# {report_type.title()} Report — {user.restaurant_name or 'My Restaurant'}\n"
         f"_Generated {datetime.now(timezone.utc).strftime('%b %d, %Y %H:%M UTC')}_\n\n"
         f"## Today\n"
         f"- Revenue: ${today_k['revenue']:,.2f} ({today_k['vs_yesterday_pct']:+}% vs yesterday)\n"
@@ -433,20 +425,22 @@ async def report(report_type: str):
 
 
 @api.get("/reports/{report_type}/pdf")
-async def report_pdf(report_type: str):
+async def report_pdf(report_type: str, user: User = Depends(get_current_user)):
     valid = {"daily", "weekly", "monthly", "branch", "investor", "marketing"}
     if report_type not in valid:
         raise HTTPException(400, f"Unknown report type. Valid: {valid}")
+    src = get_source(user.id)
     pdf = build_report_pdf(
         report_type=report_type,
-        owner={"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
-        today=today_kpis(),
-        health=health_score(),
-        branches=branch_performance(7),
-        menu=menu_performance(30),
-        customers_summary=customer_intelligence(),
-        forecast_data=forecast(30),
-        briefing=daily_briefing(),
+        owner={"name": user.name or "Owner",
+               "restaurant": user.restaurant_name or "My Restaurant"},
+        today=today_kpis(src),
+        health=health_score(src),
+        branches=branch_performance(src, 7),
+        menu=menu_performance(src, 30),
+        customers_summary=customer_intelligence(src),
+        forecast_data=forecast(src, 30),
+        briefing=daily_briefing(src),
     )
     filename = f"jhapay_{report_type}_report.pdf"
     return Response(
@@ -469,7 +463,10 @@ async def _on_startup():
         logger.exception("Database init failed at startup")
 
 
+from crud_routes import crud  # noqa: E402
+
 app.include_router(api)
+app.include_router(crud)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

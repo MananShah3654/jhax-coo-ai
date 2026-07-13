@@ -16,6 +16,29 @@ export default function Branches() {
             </Layout>
         );
 
+    // A brand-new owner has no restaurants yet — show an empty state instead
+    // of indexing into an empty list (which would crash on best.name).
+    if (!data.branches || data.branches.length === 0)
+        return (
+            <Layout>
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">
+                    Multi-Location
+                </div>
+                <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-900">
+                    Branch Performance
+                </h1>
+                <div className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-10 text-center">
+                    <div className="font-display text-lg font-semibold text-slate-900">
+                        No locations yet
+                    </div>
+                    <div className="mt-1 text-sm text-slate-500">
+                        Add your first restaurant location to start seeing
+                        performance, menu, and customer analytics here.
+                    </div>
+                </div>
+            </Layout>
+        );
+
     const best = data.branches[0];
     const worst = data.branches[data.branches.length - 1];
 

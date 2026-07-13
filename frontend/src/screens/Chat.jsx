@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Send, AlertTriangle, Plus, Trash2, MessageSquare, X, Menu as MenuIcon } from "lucide-react";
-import { API } from "@/lib/api";
+import { API, authHeader } from "@/lib/api";
 import Layout from "@/components/Layout";
 import DecisionCard from "@/components/DecisionCard";
 import VoiceMic from "@/components/VoiceMic";
@@ -246,9 +246,10 @@ export default function Chat() {
         }
         setVoicePlaying(idx);
         try {
+            const auth = await authHeader();
             const res = await fetch(`${API}/ai/tts`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...auth },
                 body: JSON.stringify({ text: text.slice(0, 3500), voice: "nova" }),
             });
             const blob = await res.blob();

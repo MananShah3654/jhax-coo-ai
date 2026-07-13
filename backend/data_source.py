@@ -119,56 +119,90 @@ class JhaPOSDataSource:
 
 # ---------- Postgres (persistent store — used when DATA_SOURCE=postgres) ----------
 class PostgresDataSource:
-    """Reads the same shapes as MockDataSource, but from PostgreSQL.
-    Seed it first with `python seed_db.py`."""
+    """Reads the same dict shapes as MockDataSource, but from PostgreSQL,
+    scoped to a single owner (tenant). Every query filters by `owner_id` so
+    one owner never sees another owner's restaurants, menu, customers, or orders.
+
+    Data is created through the app's CRUD/onboarding endpoints — no seed."""
 
     name = "postgres"
 
+    def __init__(self, owner_id: int) -> None:
+        self.owner_id = owner_id
+
     def branches(self) -> List[Dict]:
-        from db import Branch, SessionLocal
+        from database import Restaurant, SessionLocal
         with SessionLocal() as s:
-            return [b.to_dict() for b in s.query(Branch).all()]
+            rows = (s.query(Restaurant)
+                    .filter_by(owner_id=self.owner_id, is_active=True).all())
+            return [r.to_dict() for r in rows]
 
     def menu(self) -> List[Dict]:
-        from db import MenuItem, SessionLocal
+        from database import MenuItem, SessionLocal
         with SessionLocal() as s:
-            return [m.to_dict() for m in s.query(MenuItem).all()]
+            rows = (s.query(MenuItem)
+                    .filter_by(owner_id=self.owner_id, is_active=True).all())
+            return [m.to_dict() for m in rows]
 
     def customers(self) -> List[Dict]:
-        from db import Customer, SessionLocal
+        from database import Customer, SessionLocal
         with SessionLocal() as s:
-            return [c.to_dict() for c in s.query(Customer).all()]
+            rows = s.query(Customer).filter_by(owner_id=self.owner_id).all()
+            return [c.to_dict() for c in rows]
 
     def orders(self) -> List[Dict]:
-        from db import Order, SessionLocal
+        # Last 30 days, matching the mock/live adapters' window. Order.items
+        # is selectin-loaded (see database.Order) so this is 2 queries, no N+1.
+        from database import Order, SessionLocal
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         with SessionLocal() as s:
-            return [o.to_dict() for o in s.query(Order).all()]
+            rows = (s.query(Order)
+                    .filter(Order.owner_id == self.owner_id,
+                            Order.placed_at >= cutoff)
+                    .order_by(Order.placed_at).all())
+            return [o.to_dict() for o in rows]
 
     def owner(self) -> Dict:
-        from db import Owner, SessionLocal
+        from database import User, SessionLocal
         with SessionLocal() as s:
-            row = s.query(Owner).first()
-            return row.to_dict() if row else MockDataSource().owner()
+            u = s.get(User, self.owner_id)
+            if u is None:
+                return {"name": "Owner", "restaurant": "My Restaurant"}
+            return {"name": u.name or "Owner",
+                    "restaurant": u.restaurant_name or "My Restaurant"}
 
 
 # ---------- Factory ----------
+# Non-postgres sources are single-tenant dev/fallback sources and share one
+# process-wide singleton. Only the postgres source is tenant-aware: it is built
+# fresh per request with the caller's owner_id and is never cached.
 _SOURCE: object | None = None
 
 
-def get_source():
+def get_source(owner_id: int | None = None):
+    """Return a DataSource for the current request.
+
+    When DATA_SOURCE=postgres, `owner_id` is REQUIRED and a per-request,
+    owner-scoped PostgresDataSource is returned (not cached). For every other
+    source (mock/jhapos/knowlwood) the shared single-tenant singleton is
+    returned and `owner_id` is ignored.
+    """
     global _SOURCE
+    which = os.environ.get("DATA_SOURCE", "mock").lower()
+
+    if which == "postgres":
+        if owner_id is None:
+            raise ValueError("postgres data source requires an owner_id")
+        return PostgresDataSource(owner_id)
+
     if _SOURCE is None:
-        which = os.environ.get("DATA_SOURCE", "mock").lower()
         if which in ("knowlwood", "live"):
             logger.info("Using Knowlwood live menu data source")
-            _SOURCE = KnowlwoodDataSource()
+            _SOURCE = KnowlwoodDataSource()  # noqa: F821 (optional adapter)
         elif which == "jhapos":
             logger.info("Using JhaPOS live data source")
             _SOURCE = JhaPOSDataSource()
-        elif which == "postgres":
-            logger.info("Using PostgreSQL data source")
-            _SOURCE = PostgresDataSource()
         else:
-            logger.info("Using mock data source")
+            logger.info("Using mock data source (single-tenant, dev only)")
             _SOURCE = MockDataSource()
     return _SOURCE

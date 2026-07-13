@@ -12,31 +12,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
-from data_source import get_source
-
-DS = get_source()
-
-
-# Read branches/menu fresh on every call (not frozen at import) so a live
-# data source with a cache TTL actually surfaces refreshed catalog data.
-def _branches():
-    return DS.branches()
-
-
-def _menu():
-    return DS.menu()
-
-
-def _customers():
-    return DS.customers()
-
-
-def _orders():
-    return DS.orders()
-
-
-def _owner():
-    return DS.owner()
+# Every public function takes `src` (a DataSource) as its first argument so the
+# data is scoped to the calling owner. Data is read fresh on each call (a live
+# source with a cache TTL surfaces refreshed catalog data). See data_source.py.
 
 
 def _parse(ts: str) -> datetime:
@@ -47,17 +25,17 @@ def _today() -> datetime:
     return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def orders_between(start: datetime, end: datetime, branch_id: str | None = None) -> List[Dict]:
+def orders_between(src, start: datetime, end: datetime, branch_id: str | None = None) -> List[Dict]:
     out = []
-    for o in _orders():
+    for o in src.orders():
         ts = _parse(o["ts"])
         if start <= ts < end and (branch_id is None or o["branch_id"] == branch_id):
             out.append(o)
     return out
 
 
-def kpi_window(start: datetime, end: datetime, branch_id: str | None = None) -> Dict:
-    orders = orders_between(start, end, branch_id)
+def kpi_window(src, start: datetime, end: datetime, branch_id: str | None = None) -> Dict:
+    orders = orders_between(src, start, end, branch_id)
     revenue = sum(o["total"] for o in orders)
     subtotal = sum(o["subtotal"] for o in orders)
     tips = sum(o["tip"] for o in orders)
@@ -76,16 +54,16 @@ def kpi_window(start: datetime, end: datetime, branch_id: str | None = None) -> 
     }
 
 
-def today_kpis(branch_id: str | None = None) -> Dict:
+def today_kpis(src, branch_id: str | None = None) -> Dict:
     today = _today()
     tomorrow = today + timedelta(days=1)
     yesterday = today - timedelta(days=1)
     last_week_today = today - timedelta(days=7)
     last_week_tom = last_week_today + timedelta(days=1)
 
-    today_k = kpi_window(today, tomorrow, branch_id)
-    yest_k = kpi_window(yesterday, today, branch_id)
-    lw_k = kpi_window(last_week_today, last_week_tom, branch_id)
+    today_k = kpi_window(src, today, tomorrow, branch_id)
+    yest_k = kpi_window(src, yesterday, today, branch_id)
+    lw_k = kpi_window(src, last_week_today, last_week_tom, branch_id)
 
     def _pct(a: float, b: float) -> float:
         if not b:
@@ -99,33 +77,33 @@ def today_kpis(branch_id: str | None = None) -> Dict:
     }
 
 
-def branch_performance(days: int = 7) -> List[Dict]:
+def branch_performance(src, days: int = 7) -> List[Dict]:
     end = _today() + timedelta(days=1)
     start = end - timedelta(days=days)
     prev_end = start
     prev_start = prev_end - timedelta(days=days)
     out = []
-    for b in _branches():
-        cur = kpi_window(start, end, b["id"])
-        prev = kpi_window(prev_start, prev_end, b["id"])
+    for b in src.branches():
+        cur = kpi_window(src, start, end, b["id"])
+        prev = kpi_window(src, prev_start, prev_end, b["id"])
         growth = 0.0 if not prev["revenue"] else round((cur["revenue"] - prev["revenue"]) / prev["revenue"] * 100, 1)
         out.append({**b, **cur, "growth_pct": growth})
     out.sort(key=lambda x: x["revenue"], reverse=True)
     return out
 
 
-def menu_performance(days: int = 30) -> List[Dict]:
+def menu_performance(src, days: int = 30) -> List[Dict]:
     end = _today() + timedelta(days=1)
     start = end - timedelta(days=days)
     agg = defaultdict(lambda: {"qty": 0, "revenue": 0.0, "cost": 0.0})
-    for o in orders_between(start, end):
+    for o in orders_between(src, start, end):
         for it in o["items"]:
             a = agg[it["menu_id"]]
             a["qty"] += it["qty"]
             a["revenue"] += it["qty"] * it["price"]
             a["cost"] += it["qty"] * it["cost"]
     out = []
-    for m in _menu():
+    for m in src.menu():
         a = agg[m["id"]]
         profit = a["revenue"] - a["cost"]
         margin = (profit / a["revenue"] * 100) if a["revenue"] else 0.0
@@ -135,8 +113,8 @@ def menu_performance(days: int = 30) -> List[Dict]:
     return out
 
 
-def customer_intelligence() -> Dict:
-    customers = _customers()
+def customer_intelligence(src) -> Dict:
+    customers = src.customers()
     vip = [c for c in customers if "vip" in c["tags"]]
     at_risk = [c for c in customers if "at_risk" in c["tags"]]
     new = [c for c in customers if "new" in c["tags"]]
@@ -154,13 +132,13 @@ def customer_intelligence() -> Dict:
     }
 
 
-def revenue_breakdown(days: int = 30) -> Dict:
+def revenue_breakdown(src, days: int = 30) -> Dict:
     end = _today() + timedelta(days=1)
     start = end - timedelta(days=days)
     by_channel = defaultdict(float)
     by_day = defaultdict(float)
     by_hour = defaultdict(float)
-    for o in orders_between(start, end):
+    for o in orders_between(src, start, end):
         by_channel[o["channel"]] += o["total"]
         d = _parse(o["ts"]).date().isoformat()
         by_day[d] += o["total"]
@@ -172,12 +150,12 @@ def revenue_breakdown(days: int = 30) -> Dict:
     }
 
 
-def forecast(days_ahead: int = 30) -> Dict:
+def forecast(src, days_ahead: int = 30) -> Dict:
     # Simple naive forecast: last 14d daily avg with weekend uplift
     end = _today()
     start = end - timedelta(days=14)
     by_day = defaultdict(float)
-    for o in orders_between(start, end):
+    for o in orders_between(src, start, end):
         by_day[_parse(o["ts"]).date().isoformat()] += o["total"]
     daily = list(by_day.values()) or [0.0]
     avg = sum(daily) / len(daily)
@@ -198,20 +176,20 @@ def forecast(days_ahead: int = 30) -> Dict:
     }
 
 
-def health_score() -> Dict:
+def health_score(src) -> Dict:
     """0–100 score with component breakdown — feeds the Apple-watch ring."""
     # Revenue growth (7d vs prior 7d)
     end = _today() + timedelta(days=1)
-    cur = kpi_window(end - timedelta(days=7), end)
-    prev = kpi_window(end - timedelta(days=14), end - timedelta(days=7))
+    cur = kpi_window(src, end - timedelta(days=7), end)
+    prev = kpi_window(src, end - timedelta(days=14), end - timedelta(days=7))
     growth = 0.0 if not prev["revenue"] else (cur["revenue"] - prev["revenue"]) / prev["revenue"] * 100
 
-    ci = customer_intelligence()
+    ci = customer_intelligence(src)
     repeat = ci["repeat_rate_pct"]
 
     # Avg rating last 30d
     end30 = _today() + timedelta(days=1)
-    last30 = orders_between(end30 - timedelta(days=30), end30)
+    last30 = orders_between(src, end30 - timedelta(days=30), end30)
     avg_rating = sum(o["rating"] for o in last30) / max(len(last30), 1)
     avg_wait = sum(o["wait_minutes"] for o in last30) / max(len(last30), 1)
 
@@ -235,45 +213,53 @@ def health_score() -> Dict:
     }
 
 
-def daily_briefing() -> Dict:
+def daily_briefing(src) -> Dict:
     today = _today()
-    yesterday_k = kpi_window(today - timedelta(days=1), today)
-    day_before_k = kpi_window(today - timedelta(days=2), today - timedelta(days=1))
+    yesterday_k = kpi_window(src, today - timedelta(days=1), today)
+    day_before_k = kpi_window(src, today - timedelta(days=2), today - timedelta(days=1))
     growth = 0.0
     if day_before_k["revenue"]:
         growth = round((yesterday_k["revenue"] - day_before_k["revenue"]) / day_before_k["revenue"] * 100, 1)
-    menu = menu_performance(7)
-    branches = branch_performance(7)
-    ci = customer_intelligence()
-    worst_branch = branches[-1]
-    best_branch = branches[0]
-    top_seller = menu[0]
-    worst_seller = menu[-1]
+    menu = menu_performance(src, 7)
+    branches = branch_performance(src, 7)
+    ci = customer_intelligence(src)
+
+    # A brand-new owner has no restaurants / menu yet — return a valid,
+    # empty-but-safe briefing instead of index-erroring on [-1]/[0].
+    worst_branch = branches[-1] if branches else None
+    best_branch = branches[0] if branches else None
+    top_seller = menu[0] if menu else None
+    worst_seller = menu[-1] if menu else None
     opportunity = round(ci["at_risk_count"] * ci["avg_lifetime_value"] * 0.15, 0)
+
+    risk_areas = [f"{ci['at_risk_count']} customers haven't returned in 30+ days"]
+    if worst_branch:
+        direction = "down" if worst_branch["growth_pct"] < 0 else "up"
+        risk_areas.append(
+            f"{worst_branch['name']} is {abs(worst_branch['growth_pct'])}% "
+            f"{direction} week-over-week"
+        )
     return {
-        "owner_name": _owner()["name"],
+        "owner_name": src.owner()["name"],
         "yesterday_revenue": yesterday_k["revenue"],
         "yesterday_orders": yesterday_k["orders"],
         "growth_pct": growth,
-        "top_seller": top_seller["name"],
-        "worst_performer": worst_seller["name"],
-        "best_branch": best_branch["name"],
-        "worst_branch": worst_branch["name"],
-        "risk_areas": [
-            f"{ci['at_risk_count']} customers haven't returned in 30+ days",
-            f"{worst_branch['name']} branch is {abs(worst_branch['growth_pct'])}% {'down' if worst_branch['growth_pct'] < 0 else 'up'} week-over-week",
-        ],
+        "top_seller": top_seller["name"] if top_seller else None,
+        "worst_performer": worst_seller["name"] if worst_seller else None,
+        "best_branch": best_branch["name"] if best_branch else None,
+        "worst_branch": worst_branch["name"] if worst_branch else None,
+        "risk_areas": risk_areas,
         "recommended_action": (
             "Launch a reactivation campaign to inactive customers and run a "
-            "lunch combo promo at the Downtown branch this week."
+            "lunch combo promo at your top location this week."
         ),
         "expected_opportunity": opportunity,
     }
 
 
-def operations_snapshot() -> Dict:
+def operations_snapshot(src) -> Dict:
     end = _today() + timedelta(days=1)
-    last30 = orders_between(end - timedelta(days=30), end)
+    last30 = orders_between(src, end - timedelta(days=30), end)
     waits = [o["wait_minutes"] for o in last30]
     by_hour_count = defaultdict(int)
     for o in last30:
@@ -288,18 +274,19 @@ def operations_snapshot() -> Dict:
     }
 
 
-def restaurant_context() -> Dict:
+def restaurant_context(src) -> Dict:
     """Compact, structured snapshot injected into the AI system prompt."""
-    today = today_kpis()
+    today = today_kpis(src)
+    menu_30d = menu_performance(src, 30)
     return {
         "today": today,
-        "health": health_score(),
-        "branches_7d": branch_performance(7),
-        "top_menu_30d": menu_performance(30)[:5],
-        "bottom_menu_30d": menu_performance(30)[-3:],
-        "customers": {k: v for k, v in customer_intelligence().items()
+        "health": health_score(src),
+        "branches_7d": branch_performance(src, 7),
+        "top_menu_30d": menu_30d[:5],
+        "bottom_menu_30d": menu_30d[-3:],
+        "customers": {k: v for k, v in customer_intelligence(src).items()
                       if k not in ("top_vips", "at_risk_list")},
-        "operations": operations_snapshot(),
-        "forecast_30d": forecast(30)["projected_revenue"],
-        "briefing": daily_briefing(),
+        "operations": operations_snapshot(src),
+        "forecast_30d": forecast(src, 30)["projected_revenue"],
+        "briefing": daily_briefing(src),
     }

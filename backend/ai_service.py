@@ -103,8 +103,8 @@ RULES:
 """
 
 
-def _wrap_user(text: str) -> str:
-    ctx = restaurant_context()
+def _wrap_user(text: str, src) -> str:
+    ctx = restaurant_context(src)
     return (
         "RESTAURANT_CONTEXT (live data, ground every answer in this):\n"
         + json.dumps(ctx, default=str)
@@ -153,13 +153,13 @@ async def _raise_for_stream(resp: httpx.Response) -> None:
         raise RuntimeError(f"LLM error {resp.status_code}: {body[:400]}")
 
 
-async def stream_coo_reply(session_id: str, user_text: str) -> AsyncGenerator[str, None]:
+async def stream_coo_reply(session_id: str, user_text: str, src) -> AsyncGenerator[str, None]:
     """Yield raw token strings as the model generates them (SSE-friendly)."""
     stream = await _client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _wrap_user(user_text)},
+            {"role": "user", "content": _wrap_user(user_text, src)},
         ],
         stream=True,
         temperature=0.3,

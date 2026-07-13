@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, MessageCircle, Mail, Download, Loader2 } from "lucide-react";
-import { API } from "@/lib/api";
+import { API, authHeader } from "@/lib/api";
 import { toast } from "sonner";
 
 const REPORT_TYPES = [
@@ -43,7 +43,9 @@ export default function ShareModal() {
         }
         let cancelled = false;
         setBusy(true);
-        fetch(`${API}/reports/${type}/pdf`)
+        // /reports/*/pdf is a protected route — attach the Firebase token.
+        authHeader()
+            .then((auth) => fetch(`${API}/reports/${type}/pdf`, { headers: auth }))
             .then((r) => r.blob())
             .then((b) => {
                 if (cancelled) return;

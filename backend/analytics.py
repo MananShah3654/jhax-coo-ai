@@ -94,8 +94,15 @@ def today_kpis(branch_id: str | None = None) -> Dict:
 
     return {
         **today_k,
+        # Revenue deltas.
         "vs_yesterday_pct": _pct(today_k["revenue"], yest_k["revenue"]),
         "vs_last_week_pct": _pct(today_k["revenue"], lw_k["revenue"]),
+        # Order-count + AOV deltas — let the AI decompose a revenue move into its
+        # drivers (revenue = orders x average order value).
+        "orders_vs_yesterday_pct": _pct(today_k["orders"], yest_k["orders"]),
+        "orders_vs_last_week_pct": _pct(today_k["orders"], lw_k["orders"]),
+        "aov_vs_yesterday_pct": _pct(today_k["avg_order_value"], yest_k["avg_order_value"]),
+        "aov_vs_last_week_pct": _pct(today_k["avg_order_value"], lw_k["avg_order_value"]),
     }
 
 
@@ -291,9 +298,17 @@ def operations_snapshot() -> Dict:
 def restaurant_context() -> Dict:
     """Compact, structured snapshot injected into the AI system prompt."""
     today = today_kpis()
+    rb = revenue_breakdown(30)
     return {
         "today": today,
         "health": health_score(),
+        # Sales/order breakdown so the AI can answer "where do sales come from",
+        # channel mix, and peak hours — trimmed to keep the prompt compact.
+        "sales_30d": {
+            "by_channel": rb["by_channel"],       # revenue per order channel
+            "by_hour": rb["by_hour"],             # revenue per hour (7:00–22:00)
+            "by_day_14d": rb["by_day"][-14:],     # last 14 days of daily revenue
+        },
         "branches_7d": branch_performance(7),
         "top_menu_30d": menu_performance(30)[:5],
         "bottom_menu_30d": menu_performance(30)[-3:],

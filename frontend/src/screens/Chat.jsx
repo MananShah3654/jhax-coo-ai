@@ -15,7 +15,7 @@ function UserBubble({ text, idx }) {
             data-testid={TID.chatMessage(idx)}
             className="fade-up flex justify-end"
         >
-            <div className="max-w-[80%] rounded-3xl rounded-tr-md bg-slate-900 px-5 py-3 text-[15px] leading-relaxed text-white">
+            <div className="max-w-[80%] rounded-3xl rounded-tr-md bg-gradient-to-br from-slate-800 to-slate-900 px-5 py-3 text-[15px] leading-relaxed text-white shadow-[0_4px_16px_rgba(15,23,42,0.14)]">
                 {text}
             </div>
         </div>

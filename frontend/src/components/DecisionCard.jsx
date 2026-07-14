@@ -120,11 +120,16 @@ export default function DecisionCard({
     // Clarification mode
     if (reply.clarify) {
         return (
-            <div className="fade-up w-full max-w-2xl rounded-3xl rounded-tl-md border border-slate-200/70 bg-white p-6 shadow-[0_2px_18px_rgba(15,23,42,0.04)]">
-                <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#FF6B35]">
-                    Need a bit more
+            <div className="fade-up w-full max-w-2xl rounded-[28px] rounded-tl-lg border border-slate-200/70 bg-gradient-to-b from-orange-50/40 via-white to-white p-6 shadow-[0_6px_34px_rgba(15,23,42,0.06)]">
+                <div className="mb-3 flex items-center gap-2">
+                    <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_3px_10px_rgba(255,107,53,0.35)]">
+                        <Sparkles size={13} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                        AI COO · needs a bit more
+                    </span>
                 </div>
-                <p className="mt-1 font-display text-xl font-semibold leading-snug tracking-tight text-slate-900">
+                <p className="font-display text-2xl font-semibold leading-snug tracking-tight text-slate-900">
                     {reply.clarify}
                     {streaming && <span className="caret" />}
                 </p>
@@ -150,19 +155,26 @@ export default function DecisionCard({
         reply;
 
     return (
-        <div className="fade-up relative w-full overflow-hidden rounded-3xl rounded-tl-md border border-slate-200/70 bg-white p-6 shadow-[0_2px_18px_rgba(15,23,42,0.04)]">
-            <div className="absolute left-0 top-0 h-full w-1 bg-gradient-to-b from-[#FF6B35] to-[#E85D2A]" />
-
-            <div className="pl-2">
+        <div className="fade-up relative w-full overflow-hidden rounded-[28px] rounded-tl-lg border border-slate-200/70 bg-gradient-to-b from-orange-50/40 via-white to-white p-6 shadow-[0_6px_34px_rgba(15,23,42,0.06)]">
+            <div>
+                {/* AI COO persona */}
+                <div className="mb-3 flex items-center gap-2">
+                    <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_3px_10px_rgba(255,107,53,0.35)]">
+                        <Sparkles size={13} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                        AI COO
+                    </span>
+                </div>
                 {/* Hero status + impact pill + voice button */}
                 <div className="flex items-start justify-between gap-3">
-                    <h3 className="font-display text-2xl font-semibold leading-tight tracking-tight text-slate-900">
+                    <h3 className="font-display text-[28px] font-semibold leading-[1.15] tracking-tight text-slate-900">
                         {status}
                         {streaming && <span className="caret" />}
                     </h3>
                     <div className="flex shrink-0 items-center gap-2">
                         {expected_impact && (
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 font-mono text-xs font-semibold text-emerald-600">
+                            <span className="rounded-full bg-emerald-50 px-3 py-1 font-mono text-xs font-semibold text-emerald-600 ring-1 ring-emerald-100">
                                 {expected_impact}
                             </span>
                         )}
@@ -185,7 +197,7 @@ export default function DecisionCard({
 
                 {/* Tight rationale (reason + opportunity merged) */}
                 {(reason || opportunity) && (
-                    <p className="mt-2 text-[15px] leading-relaxed text-slate-600">
+                    <p className="mt-3 border-l-2 border-orange-200/80 pl-3.5 text-[15px] leading-relaxed text-slate-600">
                         {reason}
                         {reason && opportunity && (
                             <span className="text-slate-400"> &nbsp;·&nbsp; </span>

@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, create_engine, func, text,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint,
+    create_engine, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
@@ -96,6 +97,9 @@ class Restaurant(Base):
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     manager: Mapped[str | None] = mapped_column(String(120), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Square location this restaurant corresponds to (set manually; lets the
+    # Square sync map team members / shifts back to a local restaurant).
+    square_location_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -247,6 +251,106 @@ class OrderItem(Base):
         }
 
 
+# -------------------- Square: staff roster + labor shifts --------------------
+# Synced from Square (Team API + Labor API) by the 15-day sync_square.py job.
+# Both tables carry the same `owner_id` tenant key as the business tables and
+# are upserted by (owner_id, square_id) so re-running the sync never duplicates.
+class Employee(Base):
+    """A Square team member (staff), owner-scoped. Synced from /v2/team-members."""
+    __tablename__ = "team_members"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "square_id", name="uq_team_members_owner_square"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # Square location may not map to a local Restaurant, so keep it optional.
+    restaurant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="SET NULL"), nullable=True
+    )
+    # Square's team-member id — the upsert key (scoped to owner).
+    square_id: Mapped[str] = mapped_column(String(64), index=True)
+    square_location_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    given_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    family_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def to_dict(self) -> dict:
+        name = " ".join(p for p in (self.given_name, self.family_name) if p)
+        return {
+            "id": self.id, "square_id": self.square_id, "name": name or None,
+            "given_name": self.given_name, "family_name": self.family_name,
+            "email": self.email, "phone": self.phone, "status": self.status,
+            "is_owner": self.is_owner, "restaurant_id": self.restaurant_id,
+            "square_location_id": self.square_location_id,
+        }
+
+
+class Shift(Base):
+    """A clock-in/clock-out span for an Employee. Synced from /v2/labor/shifts."""
+    __tablename__ = "labor_shifts"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "square_id", name="uq_labor_shifts_owner_square"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    employee_id: Mapped[str | None] = mapped_column(
+        ForeignKey("team_members.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    restaurant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="SET NULL"), nullable=True
+    )
+    # Square's labor-shift id — the upsert key (scoped to owner).
+    square_id: Mapped[str] = mapped_column(String(64), index=True)
+    # Raw Square team-member id; resolved to employee_id at sync time.
+    square_team_member_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    square_location_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    clock_in: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    clock_out: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    declared_tips: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def to_dict(self) -> dict:
+        def _iso(v: datetime | None) -> str | None:
+            if v is None:
+                return None
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+
+        return {
+            "id": self.id, "square_id": self.square_id,
+            "employee_id": self.employee_id,
+            "square_team_member_id": self.square_team_member_id,
+            "restaurant_id": self.restaurant_id,
+            "square_location_id": self.square_location_id,
+            "clock_in": _iso(self.clock_in), "clock_out": _iso(self.clock_out),
+            "status": self.status, "declared_tips": self.declared_tips,
+        }
+
+
 def init_db() -> None:
     """Create all tables if they don't exist (idempotent).
 
@@ -258,6 +362,11 @@ def init_db() -> None:
     with engine.begin() as conn:
         conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(255)")
+        )
+        # Lets sync_square.py map a Square location back to a local restaurant.
+        conn.execute(
+            text("ALTER TABLE restaurants "
+                 "ADD COLUMN IF NOT EXISTS square_location_id VARCHAR(64)")
         )
 
 

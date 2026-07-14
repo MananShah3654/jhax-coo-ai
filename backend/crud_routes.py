@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import (
-    Customer, MenuItem, Order, OrderItem, Restaurant, User, get_db,
+    Customer, Employee, MenuItem, Order, OrderItem, Restaurant, Shift, User,
+    get_db,
 )
 
 crud = APIRouter(prefix="/api")
@@ -343,3 +344,59 @@ def list_orders(
         q = q.filter(Order.restaurant_id == restaurant_id)
     rows = q.order_by(Order.placed_at.desc()).all()
     return {"days": days, "orders": [o.to_dict() for o in rows]}
+
+
+# ==================== employees + shifts (Square sync, read-only) ====================
+# These rows are populated by sync_square.py (Square Team + Labor APIs), not by
+# app writes. Reads are owner_id-scoped like everything else.
+def _own_employee(db: Session, user: User, employee_id: str) -> Employee:
+    e = db.get(Employee, employee_id)
+    if e is None or e.owner_id != user.id:
+        raise HTTPException(404, "Employee not found")
+    return e
+
+
+@crud.get("/employees")
+def list_employees(
+    restaurant_id: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Employee roster for the owner, optionally scoped to one restaurant.
+
+    Each employee carries `last_shift` (their most recent clock-in/out) so the
+    UI can show who's on/off without a second request per row.
+    """
+    q = db.query(Employee).filter_by(owner_id=user.id)
+    if restaurant_id:
+        _own_restaurant(db, user, restaurant_id)
+        q = q.filter_by(restaurant_id=restaurant_id)
+    rows = q.order_by(Employee.given_name, Employee.family_name).all()
+
+    out = []
+    for e in rows:
+        last = (db.query(Shift)
+                .filter_by(owner_id=user.id, employee_id=e.id)
+                .order_by(Shift.clock_in.desc()).first())
+        data = e.to_dict()
+        data["last_shift"] = last.to_dict() if last else None
+        out.append(data)
+    return {"employees": out}
+
+
+@crud.get("/employees/{employee_id}/shifts")
+def list_employee_shifts(
+    employee_id: str,
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from datetime import timedelta
+    _own_employee(db, user, employee_id)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (db.query(Shift)
+            .filter(Shift.owner_id == user.id,
+                    Shift.employee_id == employee_id,
+                    Shift.clock_in >= cutoff)
+            .order_by(Shift.clock_in.desc()).all())
+    return {"days": days, "shifts": [s.to_dict() for s in rows]}

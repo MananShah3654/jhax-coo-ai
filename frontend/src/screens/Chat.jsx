@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Send, AlertTriangle, Plus, Trash2, MessageSquare, X, Menu as MenuIcon, Sparkles, ArrowUpRight } from "lucide-react";
+import { Send, AlertTriangle, Plus, Trash2, MessageSquare, X, Menu as MenuIcon, Sparkles, ArrowUpRight, TrendingUp, Search, MapPin, UtensilsCrossed, Clock, LineChart } from "lucide-react";
 import { API } from "@/lib/api";
 import Layout from "@/components/Layout";
 import DecisionCard from "@/components/DecisionCard";
 import VoiceMic from "@/components/VoiceMic";
 import { useCooChat } from "@/hooks/useCooChat";
 import { useChatHistory } from "@/hooks/useChatHistory";
+import { useAuth } from "@/contexts/AuthContext";
 import { TID } from "@/constants/testIds";
+
+// Quick-start prompts, each framed as a capability with an icon + subtitle so
+// the empty state reads as an invitation rather than a plain list.
+const STARTERS = [
+    { Icon: TrendingUp, q: "How is my business today?", sub: "Revenue, orders & AOV", tint: "text-emerald-600 bg-emerald-50" },
+    { Icon: Search, q: "Why are sales down?", sub: "Root-cause analysis", tint: "text-[#FF6B35] bg-orange-50" },
+    { Icon: MapPin, q: "Which branch is underperforming?", sub: "Branch comparison", tint: "text-sky-600 bg-sky-50" },
+    { Icon: UtensilsCrossed, q: "Create a combo for slow lunch hours", sub: "Menu & promotions", tint: "text-violet-600 bg-violet-50" },
+    { Icon: Clock, q: "What are my busiest hours?", sub: "Peak-hour insights", tint: "text-amber-600 bg-amber-50" },
+    { Icon: LineChart, q: "Forecast revenue for next 30 days", sub: "AI forecast", tint: "text-rose-600 bg-rose-50" },
+];
 
 function UserBubble({ text, idx }) {
     return (
@@ -158,6 +170,8 @@ function HistorySidebar({
 export default function Chat() {
     const location = useLocation();
     const initialQ = location.state?.question;
+    const { profile } = useAuth();
+    const firstName = (profile?.name || "").trim().split(" ")[0];
 
     const {
         index,
@@ -277,6 +291,8 @@ export default function Chat() {
                 />
 
                 <div className="relative flex flex-1 flex-col">
+                    {/* Ambient warm glow for depth */}
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(60%_100%_at_50%_0%,rgba(255,107,53,0.06),transparent)]" />
                     {/* Top bar */}
                     <div className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur-xl lg:px-8">
                         <div className="flex items-center gap-2">
@@ -306,32 +322,41 @@ export default function Chat() {
                     >
                         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
                             {messages.length === 0 && (
-                                <div className="fade-up mx-auto mt-8 max-w-2xl text-center">
-                                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_8px_24px_rgba(255,107,53,0.35)]">
-                                        <Sparkles size={22} />
+                                <div className="fade-up mx-auto mt-6 max-w-2xl text-center">
+                                    <div className="relative mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_10px_30px_rgba(255,107,53,0.4)]">
+                                        <span className="absolute inset-0 animate-ping rounded-2xl bg-[#FF6B35]/30" />
+                                        <Sparkles size={26} className="relative" />
                                     </div>
-                                    <h2 className="mt-5 font-display text-3xl font-semibold tracking-tight text-slate-900">
-                                        What would you like to know?
+                                    <div className="mt-5 text-[10px] font-bold uppercase tracking-[0.28em] text-[#FF6B35]">
+                                        Your AI Chief Operating Officer
+                                    </div>
+                                    <h2 className="mt-2 font-display text-4xl font-semibold tracking-tight text-slate-900">
+                                        {firstName
+                                            ? `What can I run for you, ${firstName}?`
+                                            : "What would you like to know?"}
                                     </h2>
-                                    <p className="mx-auto mt-2 max-w-md text-[15px] leading-relaxed text-slate-500">
-                                        Ask about revenue, customers, menu, or operations —
-                                        one question, one answer, one action.
+                                    <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-slate-500">
+                                        Ask anything about your restaurant — one question,
+                                        one clear answer, one action to take.
                                     </p>
-                                    <div className="mt-7 grid gap-2.5 text-left sm:grid-cols-2">
-                                        {[
-                                            "How is my business today?",
-                                            "Why are sales down?",
-                                            "Which branch is underperforming?",
-                                            "Create a combo for slow lunch hours",
-                                            "What are my busiest hours?",
-                                            "Forecast revenue for next 30 days",
-                                        ].map((s) => (
+                                    <div className="mt-8 grid gap-3 text-left sm:grid-cols-2">
+                                        {STARTERS.map(({ Icon, q, sub, tint }) => (
                                             <button
-                                                key={s}
-                                                onClick={() => ask(s)}
-                                                className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left text-sm text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#FF6B35]/50 hover:text-[#E85D2A] hover:shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
+                                                key={q}
+                                                onClick={() => ask(q)}
+                                                className="group flex items-center gap-3.5 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3.5 text-left shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#FF6B35]/40 hover:shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
                                             >
-                                                <span>{s}</span>
+                                                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${tint}`}>
+                                                    <Icon size={16} />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm font-medium text-slate-800 group-hover:text-[#E85D2A]">
+                                                        {q}
+                                                    </span>
+                                                    <span className="block text-xs text-slate-400">
+                                                        {sub}
+                                                    </span>
+                                                </span>
                                                 <ArrowUpRight
                                                     size={15}
                                                     className="shrink-0 text-slate-300 transition-colors group-hover:text-[#FF6B35]"
@@ -398,7 +423,7 @@ export default function Chat() {
 
                     {/* Composer */}
                     <div className="absolute inset-x-0 bottom-12 z-30 px-4 lg:bottom-6 lg:px-8">
-                        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+                        <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-full border border-slate-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(15,23,42,0.08)] transition-all duration-200 focus-within:border-[#FF6B35]/60 focus-within:shadow-[0_12px_44px_rgba(255,107,53,0.16)] focus-within:ring-4 focus-within:ring-orange-100">
                             <div className="pl-2">
                                 <VoiceMic
                                     size="inline"

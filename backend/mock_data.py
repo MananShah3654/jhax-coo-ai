@@ -13,12 +13,20 @@ from typing import Dict, List
 
 RNG = random.Random(42)
 
+# `seats` / `tables` = physical dining capacity per branch. They power the
+# seating KPIs (Table Turnover Rate, RevPASH) — a POS like Square can't report
+# these, so they live on the branch record. ~4 seats per table.
 BRANCHES: List[Dict] = [
-    {"id": "br_downtown", "name": "Downtown",      "city": "San Francisco", "manager": "Avinn"},
-    {"id": "br_marina",   "name": "Marina",        "city": "San Francisco", "manager": "Priya"},
-    {"id": "br_palo_alto","name": "Palo Alto",     "city": "Palo Alto",     "manager": "Rohan"},
-    {"id": "br_sj",       "name": "San Jose",      "city": "San Jose",      "manager": "Diego"},
+    {"id": "br_downtown", "name": "Downtown",      "city": "San Francisco", "manager": "Avinn", "seats": 96, "tables": 24},
+    {"id": "br_marina",   "name": "Marina",        "city": "San Francisco", "manager": "Priya", "seats": 72, "tables": 18},
+    {"id": "br_palo_alto","name": "Palo Alto",     "city": "Palo Alto",     "manager": "Rohan", "seats": 56, "tables": 14},
+    {"id": "br_sj",       "name": "San Jose",      "city": "San Jose",      "manager": "Diego", "seats": 48, "tables": 12},
 ]
+
+# Business hours 07:00–22:00 (matches the hourly order distribution below and
+# the 7–22 windows in analytics). Available seat-hours = seats × this × days,
+# the denominator for RevPASH (Revenue Per Available Seat-Hour).
+SERVICE_HOURS_PER_DAY = 15
 
 MENU_ITEMS: List[Dict] = [
     {"id": "m_btl_sand",  "name": "BLT Sandwich",         "category": "Sandwiches", "price": 13.37, "cost": 4.10},
@@ -133,11 +141,20 @@ def _gen_orders(customers: List[Dict], menu: List[Dict] | None = None,
                     items.append({"menu_id": m["id"], "name": m["name"], "qty": qty,
                                   "price": m["price"], "cost": m["cost"]})
                     subtotal += m["price"] * qty
-                tax = round(subtotal * 0.0875, 2)
+                # Per-order discount: most orders carry none, some a promo.
+                # Tracked as real POS data so the discount-overuse signal works.
+                discount_pct = RNG.choices([0, 0.10, 0.15, 0.20, 0.25],
+                                           weights=[70, 12, 9, 6, 3])[0]
+                discount = round(subtotal * discount_pct, 2)
+                tax = round((subtotal - discount) * 0.0875, 2)
                 tip_pct = RNG.choices([0,0.10,0.15,0.18,0.20,0.25], weights=[20,10,15,28,20,7])[0]
                 tip = round(subtotal * tip_pct, 2)
-                total = round(subtotal + tax + tip, 2)
+                total = round(subtotal - discount + tax + tip, 2)
                 cust = RNG.choice(customers)
+                # party_size = covers (guests) on the order. Drives the Covers
+                # KPI; the party count on dine-in orders also drives Table
+                # Turnover (one seated party ≈ one table turn).
+                party_size = RNG.choices([1,2,3,4,5,6], weights=[22,34,18,14,8,4])[0]
                 orders.append({
                     "id": f"o_{len(orders)+1:06d}",
                     "branch_id": br["id"],
@@ -145,7 +162,9 @@ def _gen_orders(customers: List[Dict], menu: List[Dict] | None = None,
                     "channel": RNG.choices(CHANNELS, weights=[55,28,17])[0],
                     "customer_id": cust["id"],
                     "items": items,
+                    "party_size": party_size,
                     "subtotal": round(subtotal, 2),
+                    "discount": discount,
                     "tax": tax,
                     "tip": tip,
                     "total": total,
@@ -153,6 +172,31 @@ def _gen_orders(customers: List[Dict], menu: List[Dict] | None = None,
                     "rating": RNG.choices([3,4,5], weights=[10,40,50])[0],
                 })
     return orders
+
+
+def _gen_carts(orders: List[Dict], abandon_prob: float = 0.28) -> List[Dict]:
+    """Abandoned online checkout sessions — the denominator half a POS never sees.
+
+    Cart Abandonment Rate only makes sense for online channels (To-Go / Delivery),
+    where a guest can start a checkout and bail. Dine-in walk-ins have no cart. For
+    each completed online order we emit an abandoned session with probability
+    `abandon_prob`, so the rate = abandoned / (abandoned + completed-online) lands
+    around 22%. These sessions are NOT orders — they exist only in this stream, so
+    a source without it (e.g. Square) honestly reports the KPI as unavailable.
+    """
+    carts: List[Dict] = []
+    for o in orders:
+        channel = (o.get("channel") or "").strip().lower()
+        if channel in ("to-go", "delivery") and RNG.random() < abandon_prob:
+            carts.append({
+                "id": f"cart_{len(carts)+1:06d}",
+                "branch_id": o["branch_id"],
+                "ts": o["ts"],                      # session time (never became an order)
+                "channel": o["channel"],
+                "cart_value": o["subtotal"],
+                "abandoned_at": RNG.choice(["cart", "checkout", "payment"]),
+            })
+    return carts
 
 
 def build_dataset(menu: List[Dict] | None = None,
@@ -170,12 +214,14 @@ def build_dataset(menu: List[Dict] | None = None,
     # Generate a full quarter of orders so weekly / 15-day / monthly /
     # quarterly views all have real underlying data.
     orders = _gen_orders(customers, menu, days=90)
+    carts = _gen_carts(orders)
     return {
         "owner": owner or {"name": "Manan", "restaurant": "Jha Bistro"},
         "branches": BRANCHES,
         "menu": menu,
         "customers": customers,
         "orders": orders,
+        "carts": carts,
     }
 
 

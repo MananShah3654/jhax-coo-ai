@@ -27,6 +27,7 @@ Each *DataSource exposes the same shape:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -53,6 +54,10 @@ class MockDataSource:
     def customers(self)-> List[Dict]: return self._d["customers"]
     def orders(self)   -> List[Dict]: return self._d["orders"]
     def owner(self)    -> Dict:       return self._d["owner"]
+    # Abandoned online checkout sessions — powers the Cart Abandonment Rate KPI.
+    # Only the mock source has this stream; live POS adapters (Square/JhaPOS)
+    # don't expose it, so analytics reports the KPI as unavailable there.
+    def carts(self)    -> List[Dict]: return self._d.get("carts", [])
 
 
 # ---------- JhaPOS (live HTTP adapter — used when DATA_SOURCE=jhapos) ----------
@@ -173,6 +178,44 @@ def _estimate_cost(price: float, category: str) -> float:
 _SQUARE_VERSION = "2024-10-17"
 
 
+# Square exposes no dining capacity, but the Table Turnover and RevPASH KPIs need
+# seats/tables per branch. We attach a static capacity to each mapped location so
+# those KPIs light up on live Square. Precedence:
+#   1. SQUARE_SEAT_CAPACITY env (JSON) keyed by location id OR name (case-insensitive)
+#   2. _SQUARE_DEFAULT_CAPACITY (tunable via SQUARE_DEFAULT_SEATS/_TABLES)
+# Example: SQUARE_SEAT_CAPACITY='{"LA8VJR69N9V6E": {"seats": 64, "tables": 16}}'
+_SQUARE_DEFAULT_CAPACITY = {
+    "seats": int(os.environ.get("SQUARE_DEFAULT_SEATS", "64") or 64),
+    "tables": int(os.environ.get("SQUARE_DEFAULT_TABLES", "16") or 16),
+}
+
+
+def _load_square_capacity() -> Dict[str, Dict]:
+    """Parse SQUARE_SEAT_CAPACITY (JSON) into a lowercased id/name -> capacity map."""
+    raw = os.environ.get("SQUARE_SEAT_CAPACITY", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k).lower(): v for k, v in data.items()}
+    except Exception as exc:
+        logger.warning("SQUARE_SEAT_CAPACITY ignored (invalid JSON): %s", exc)
+        return {}
+
+
+_SQUARE_CAPACITY = _load_square_capacity()
+
+
+def _square_capacity(loc_id: str | None, name: str | None) -> Dict[str, int]:
+    """Seats/tables for a Square location, matched by id then name, else default."""
+    cap = (
+        _SQUARE_CAPACITY.get((loc_id or "").lower())
+        or _SQUARE_CAPACITY.get((name or "").lower())
+        or _SQUARE_DEFAULT_CAPACITY
+    )
+    return {"seats": int(cap.get("seats") or 0), "tables": int(cap.get("tables") or 0)}
+
+
 class SquareDataSource:
     """Live adapter for Square's Connect REST API (sandbox or production).
 
@@ -243,11 +286,18 @@ class SquareDataSource:
     @staticmethod
     def _map_location(loc: Dict) -> Dict:
         addr = loc.get("address") or {}
+        loc_id = loc.get("id")
+        name = loc.get("name") or "Location"
+        cap = _square_capacity(loc_id, name)
         return {
-            "id": loc.get("id"),
-            "name": loc.get("name") or "Location",
+            "id": loc_id,
+            "name": name,
             "city": addr.get("locality") or "",
             "manager": "",
+            # Static dining capacity (Square can't report it) so Table Turnover
+            # and RevPASH compute on live Square. See _square_capacity.
+            "seats": cap["seats"],
+            "tables": cap["tables"],
         }
 
     @staticmethod
@@ -305,6 +355,9 @@ class SquareDataSource:
         total = _money("total_money")
         tax = _money("total_tax_money")
         tip = _money("total_tip_money")
+        # Square exposes aggregate discounts on the order; map it so the
+        # discount-overuse signal runs on real POS data (0.0 when none applied).
+        discount = _money("total_discount_money")
         return {
             "id": o.get("id"),
             "branch_id": o.get("location_id"),
@@ -313,6 +366,7 @@ class SquareDataSource:
             "customer_id": o.get("customer_id") or "",
             "items": items,
             "subtotal": round(total - tax - tip, 2),
+            "discount": discount,
             "tax": tax,
             "tip": tip,
             "total": total,

@@ -216,6 +216,10 @@ async def dashboard():
     return {
         "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
         "today": today_kpis(),
+        # Repeat Customer Rate is a cohort snapshot (not a daily window), so it
+        # comes from customer_intelligence rather than today_kpis — surfaced here
+        # so the dashboard can show all headline KPIs from one call.
+        "repeat_rate_pct": customer_intelligence()["repeat_rate_pct"],
         "health": health_score(),
         "briefing": daily_briefing(),
         "branches_top3": branch_performance(7)[:3],

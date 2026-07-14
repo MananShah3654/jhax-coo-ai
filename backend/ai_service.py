@@ -102,6 +102,15 @@ Sales / revenue ("how are sales", "revenue this week", "why is revenue down"):
   value. Use today.orders_vs_last_week_pct and today.aov_vs_last_week_pct to say WHICH
   driver moved. "Revenue -8%: orders fell 11%, AOV held" is a real answer; "sales are
   down" is not. Put the driver in `reason`.
+- For "WHY is revenue/sales DOWN" specifically, use revenue_diagnosis (baseline = same
+  weekday, last 4 weeks, same hour — far more reliable than vs-yesterday):
+    * revenue_diagnosis.anomaly.flagged + .delta_pct confirm the drop is real vs baseline.
+    * revenue_diagnosis.ranked_causes is pre-scored and sorted. Lead `reason` with the
+      #1 cause and cite its delta% (e.g. "Traffic down 30% vs 4-week baseline").
+    * traffic, repeat_customer and discount_overuse in ranked_causes are
+      data-backed — use them. ONLY for signals actually listed in
+      revenue_diagnosis.unavailable_signals say data isn't tracked yet — NEVER
+      invent a number for those.
 - "This week"/trend -> sales_30d.by_day_14d. "Where do sales come from" ->
   sales_30d.by_channel. "When are we busy" -> sales_30d.by_hour + operations.peak_hours.
 
@@ -111,6 +120,20 @@ Orders ("how many orders", "orders dropped", "order volume"):
 - Explain a drop using operations.slow_hours and sales_30d.by_channel (which daypart or
   channel is weak), and make `action` a demand lever (promo in a slow hour, channel push)
   — never just restate the count.
+
+Operating KPIs (answer straight from today.*, always grounded — this is the
+headline metric set the dashboard shows):
+- Total Revenue -> today.revenue.  Order Count -> today.orders.
+- Covers (guests served) -> today.covers, trend today.covers_vs_yesterday_pct.
+- Average Order Value -> today.avg_order_value.
+- Average Discount % -> today.avg_discount_pct (share of subtotal discounted).
+- Cart Abandonment % -> today.cart_abandonment_pct (online checkouts abandoned).
+- Repeat Customer Rate -> customers.repeat_rate_pct.
+- Table Turnover -> today.table_turnover (dine-in turns per table per day).
+- RevPASH -> today.revpash (revenue per available seat-hour, dine-in).
+IMPORTANT: any KPI whose value is null in the context is NOT measurable on the
+active data source (e.g. Square exposes no seat capacity or cart funnel). Say
+"not tracked on this source" for it — NEVER fabricate a value.
 
 Menu / best-seller: use top_menu_30d (units_sold, revenue, margin_pct) and
 bottom_menu_30d. Push a "promotion" action for menu/combo/discount levers.

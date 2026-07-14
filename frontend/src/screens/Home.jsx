@@ -10,6 +10,12 @@ import {
     Sun,
     Sparkles,
     Send,
+    UtensilsCrossed,
+    Receipt,
+    ShoppingCart,
+    Percent,
+    RotateCw,
+    Armchair,
 } from "lucide-react";
 import { api, fmtUsd } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -237,11 +243,19 @@ export default function Home() {
                 </div>
             </div>
 
-            {/* KPIs */}
-            <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {/* KPIs — the 8 headline operating metrics */}
+            <div className="mt-10 flex items-baseline justify-between">
+                <h2 className="font-display text-lg font-semibold tracking-tight text-slate-900">
+                    Today&apos;s KPIs
+                </h2>
+                <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">
+                    Source: {data.data_source}
+                </span>
+            </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <KpiTile
                     testId={TID.kpiRevenue}
-                    label="Revenue Today"
+                    label="Total Revenue"
                     value={t.revenue}
                     change={t.vs_yesterday_pct}
                     money
@@ -249,19 +263,74 @@ export default function Home() {
                     sublabel="vs. yesterday"
                 />
                 <KpiTile
-                    testId={TID.kpiOrders}
-                    label="Orders"
-                    value={t.orders}
-                    icon={<ShoppingBag size={16} className="text-slate-300" />}
-                    sublabel="today"
+                    testId={TID.kpiCovers}
+                    label="Covers"
+                    value={t.covers}
+                    change={t.covers_vs_yesterday_pct}
+                    icon={<UtensilsCrossed size={16} className="text-slate-300" />}
+                    sublabel={`${t.orders} orders today`}
                 />
                 <KpiTile
                     testId={TID.kpiAov}
-                    label="Avg Order"
+                    label="Avg Order Value"
                     value={t.avg_order_value}
                     money
-                    icon={<Repeat size={16} className="text-slate-300" />}
+                    icon={<Receipt size={16} className="text-slate-300" />}
                     sublabel="basket size"
+                />
+                <KpiTile
+                    testId={TID.kpiCartAbandon}
+                    label="Cart Abandonment"
+                    value={t.cart_abandonment_pct}
+                    suffix="%"
+                    icon={<ShoppingCart size={16} className="text-slate-300" />}
+                    sublabel="online checkouts"
+                />
+                <KpiTile
+                    testId={TID.kpiRepeat}
+                    label="Repeat Customers"
+                    value={data.repeat_rate_pct}
+                    suffix="%"
+                    icon={<Repeat size={16} className="text-slate-300" />}
+                    sublabel="returning guests"
+                />
+                <KpiTile
+                    testId={TID.kpiDiscount}
+                    label="Avg Discount"
+                    value={t.avg_discount_pct}
+                    suffix="%"
+                    icon={<Percent size={16} className="text-slate-300" />}
+                    sublabel="of subtotal"
+                />
+                <KpiTile
+                    testId={TID.kpiTurnover}
+                    label="Table Turnover"
+                    value={t.table_turnover}
+                    suffix="×"
+                    icon={<RotateCw size={16} className="text-slate-300" />}
+                    sublabel="turns / table · day"
+                    naHint="Needs seating data"
+                />
+                <KpiTile
+                    testId={TID.kpiRevpash}
+                    label="RevPASH"
+                    value={t.revpash}
+                    prefix="$"
+                    icon={<Armchair size={16} className="text-slate-300" />}
+                    sublabel="revenue / seat · hour"
+                    naHint="Needs seating data"
+                />
+            </div>
+
+            {/* Secondary metrics */}
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <KpiTile
+                    testId={TID.kpiOrders}
+                    label="Orders"
+                    value={t.orders}
+                    change={t.orders_vs_yesterday_pct}
+                    icon={<ShoppingBag size={16} className="text-slate-300" />}
+                    sublabel="today"
                 />
                 <KpiTile
                     testId={TID.kpiTips}
@@ -276,7 +345,7 @@ export default function Home() {
                     label="Customers"
                     value={t.customers}
                     icon={<Users size={16} className="text-slate-300" />}
-                    sublabel="today"
+                    sublabel="unique today"
                 />
             </div>
 

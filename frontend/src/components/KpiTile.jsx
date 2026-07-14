@@ -1,16 +1,37 @@
 import { fmtUsd, fmtPct } from "@/lib/api";
 
+/**
+ * A single headline KPI tile.
+ *
+ * value  — the number to show (null/undefined => rendered as "—")
+ * money  — format value as USD
+ * suffix — unit appended to a plain numeric value (e.g. "%", "×", "/seat·hr")
+ * prefix — unit prepended (e.g. "$" when not using the `money` currency format)
+ * change — optional delta % (green up / red down arrow)
+ * naHint — sublabel shown when the value is unavailable (null) on the active source
+ */
 export default function KpiTile({
     label,
     value,
     change,
     sublabel,
     money = false,
+    suffix = "",
+    prefix = "",
+    naHint = "Not tracked on this source",
     testId,
     icon = null,
 }) {
+    const isNil = value === null || value === undefined || value === "";
     const up = change > 0;
     const down = change < 0;
+
+    const display = isNil
+        ? "—"
+        : money
+          ? fmtUsd(value)
+          : `${prefix}${value}${suffix}`;
+
     return (
         <div
             data-testid={testId}
@@ -23,10 +44,14 @@ export default function KpiTile({
                 {icon}
             </div>
             <div className="flex items-baseline gap-2">
-                <div className="font-display text-3xl font-semibold tracking-tight text-slate-900">
-                    {money ? fmtUsd(value) : value}
+                <div
+                    className={`font-display text-3xl font-semibold tracking-tight ${
+                        isNil ? "text-slate-300" : "text-slate-900"
+                    }`}
+                >
+                    {display}
                 </div>
-                {typeof change === "number" && (
+                {!isNil && typeof change === "number" && (
                     <div
                         className={`text-xs font-semibold ${up ? "text-emerald-600" : down ? "text-red-500" : "text-slate-400"}`}
                     >
@@ -34,8 +59,10 @@ export default function KpiTile({
                     </div>
                 )}
             </div>
-            {sublabel && (
-                <div className="text-xs text-slate-500">{sublabel}</div>
+            {(sublabel || isNil) && (
+                <div className="text-xs text-slate-500">
+                    {isNil ? naHint : sublabel}
+                </div>
             )}
         </div>
     );

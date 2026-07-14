@@ -148,8 +148,45 @@ RULES:
 """
 
 
-def _wrap_user(text: str) -> str:
+# The heavy context sections — the same-weekday revenue diagnosis, the 30-day
+# menu leaderboards, and the sales-by-channel/hour/day history — are only injected
+# when the question actually calls for them. A plain KPI question ("how many covers
+# today?") no longer ships the full ~1.7k-token snapshot on every turn, which
+# roughly halves per-call input tokens — important on metered / free LLM tiers
+# (e.g. Groq's 100k tokens/day free cap). The compact `today`/health/customers/
+# operations/branches core is always sent so KPI answers stay fully grounded.
+_CTX_TRIGGERS = {
+    "revenue_diagnosis": ("why", "down", "drop", "fell", "fall", "declin", "lower",
+                          "slow", "lost", "losing", "worse", "tank", "sink",
+                          "sluggish", "underperform", "diagnos", "cause", "reason"),
+    "menu": ("menu", "item", "seller", "sell", "dish", "food", "plate", "combo",
+             "bundle", "product", "margin", "profit", "popular"),
+    "sales_30d": ("channel", "hour", "daypart", "busy", "peak", "when", "where",
+                  "breakdown", "trend", "week", "daily", "delivery", "takeout",
+                  "to-go", "togo", "dine", "online", "source", "month"),
+}
+_MENU_KEYS = ("top_menu_30d", "bottom_menu_30d")
+_HEAVY_KEYS = ("revenue_diagnosis", "sales_30d", *_MENU_KEYS)
+
+
+def _select_context(question: str) -> dict:
+    """Full context minus heavy sections the question doesn't need."""
     ctx = restaurant_context()
+    q = (question or "").lower()
+    lean = {k: v for k, v in ctx.items() if k not in _HEAVY_KEYS}
+    if any(kw in q for kw in _CTX_TRIGGERS["revenue_diagnosis"]):
+        lean["revenue_diagnosis"] = ctx.get("revenue_diagnosis")
+    if any(kw in q for kw in _CTX_TRIGGERS["sales_30d"]):
+        lean["sales_30d"] = ctx.get("sales_30d")
+    if any(kw in q for kw in _CTX_TRIGGERS["menu"]):
+        for k in _MENU_KEYS:
+            if k in ctx:
+                lean[k] = ctx[k]
+    return lean
+
+
+def _wrap_user(text: str) -> str:
+    ctx = _select_context(text)
     return (
         "RESTAURANT_CONTEXT (live data, ground every answer in this):\n"
         + json.dumps(ctx, default=str)

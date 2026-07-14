@@ -38,6 +38,13 @@ h3,
 h4,
 h5,
 .font-display {
+    font-family: "Fraunces", "Outfit", Georgia, serif;
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+}
+
+/* Clean geometric sans for the rare place a display serif shouldn't go. */
+.font-grotesk {
     font-family: "Outfit", "Manrope", sans-serif;
     letter-spacing: -0.02em;
 }

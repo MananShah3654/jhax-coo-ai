@@ -45,7 +45,7 @@ export default function KpiTile({
             </div>
             <div className="flex items-baseline gap-2">
                 <div
-                    className={`font-display text-3xl font-semibold tracking-tight ${
+                    className={`font-display text-3xl font-semibold tracking-tight tabular-nums ${
                         isNil ? "text-slate-300" : "text-slate-900"
                     }`}
                 >

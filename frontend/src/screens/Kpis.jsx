@@ -59,7 +59,7 @@ function Metric({ label, value, money, unit = "", prefix = "", change, sub, naHi
             </div>
             <div className="flex items-end gap-2">
                 <span
-                    className={`font-mono text-[28px] font-semibold leading-none tracking-tight ${
+                    className={`font-display text-[32px] font-semibold leading-none tracking-tight tabular-nums ${
                         nil ? "text-slate-300" : "text-slate-900"
                     }`}
                 >
@@ -126,7 +126,7 @@ function RevenueHero({ value, change, series }) {
                     Total Revenue · Today
                 </div>
                 <div className="mt-2 flex items-end gap-3">
-                    <span className="font-mono text-5xl font-semibold tracking-tight text-slate-900">
+                    <span className="font-display text-6xl font-semibold tracking-tight text-slate-900">
                         {fmtUsd(value)}
                     </span>
                     <span className="mb-1">

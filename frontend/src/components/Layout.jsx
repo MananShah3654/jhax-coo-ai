@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
     Home,
-    Gauge,
     MessageSquare,
     MapPin,
     Users,
@@ -17,7 +16,6 @@ import { TID } from "@/constants/testIds";
 
 const NAV = [
     { to: "/home",      label: "AI COO Home", Icon: Home,            tid: TID.navHome },
-    { to: "/kpis",      label: "Key Metrics", Icon: Gauge,           tid: TID.navKpis },
     { to: "/chat",      label: "Ask Anything", Icon: MessageSquare,  tid: TID.navChat },
     { to: "/branches",  label: "Branches",     Icon: MapPin,         tid: TID.navBranches },
     { to: "/customers", label: "Customers",    Icon: Users,          tid: TID.navCustomers },

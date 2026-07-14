@@ -10,7 +10,6 @@ import Onboarding from "@/screens/Onboarding";
 import PinSetup from "@/screens/PinSetup";
 import PinLock from "@/screens/PinLock";
 import Home from "@/screens/Home";
-import Kpis from "@/screens/Kpis";
 import Chat from "@/screens/Chat";
 import Branches from "@/screens/Branches";
 import Customers from "@/screens/Customers";
@@ -111,14 +110,6 @@ function AppRoutes() {
                 element={
                     <Protected>
                         <Home />
-                    </Protected>
-                }
-            />
-            <Route
-                path="/kpis"
-                element={
-                    <Protected>
-                        <Kpis />
                     </Protected>
                 }
             />

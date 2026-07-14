@@ -88,7 +88,7 @@ function ActionButton({ act, idx, msgIdx }) {
             data-testid={TID.chatActionBtn(msgIdx ?? 0, act.id || idx)}
             onClick={onClick}
             disabled={busy}
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all ${meta.cls} disabled:opacity-60`}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${meta.cls} disabled:translate-y-0 disabled:opacity-60`}
         >
             {busy ? (
                 <Loader2 size={14} className="animate-spin" />
@@ -120,27 +120,28 @@ export default function DecisionCard({
     // Clarification mode
     if (reply.clarify) {
         return (
-            <div className="fade-up w-full max-w-2xl rounded-[28px] rounded-tl-lg border border-slate-200/70 bg-gradient-to-b from-orange-50/40 via-white to-white p-6 shadow-[0_6px_34px_rgba(15,23,42,0.06)]">
-                <div className="mb-3 flex items-center gap-2">
-                    <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_3px_10px_rgba(255,107,53,0.35)]">
-                        <Sparkles size={13} />
+            <div className="decision-card card-sheen fade-up relative w-full max-w-2xl overflow-hidden rounded-[30px] rounded-tl-lg border border-white/60 bg-gradient-to-b from-orange-50/50 via-white to-white p-7 ring-1 ring-orange-100/60">
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#FF6B35] via-[#F7931E] to-[#FF6B35]" />
+                <div className="mb-4 flex items-center gap-2.5">
+                    <div className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_6px_16px_rgba(255,107,53,0.4)]">
+                        <Sparkles size={14} />
                     </div>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gradient-warm">
                         AI COO · needs a bit more
                     </span>
                 </div>
-                <p className="font-display text-2xl font-semibold leading-snug tracking-tight text-slate-900">
+                <p className="font-display text-[27px] font-semibold leading-[1.2] tracking-tight text-slate-900">
                     {reply.clarify}
                     {streaming && <span className="caret" />}
                 </p>
                 {Array.isArray(reply.suggestions) && reply.suggestions.length > 0 && (
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-5 flex flex-wrap gap-2">
                         {reply.suggestions.map((s, i) => (
                             <button
                                 key={i}
                                 data-testid={`clarify-suggestion-${i}`}
                                 onClick={() => onSuggestion?.(s)}
-                                className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
+                                className="rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#FF6B35] hover:text-[#E85D2A] hover:shadow-md"
                             >
                                 {s}
                             </button>
@@ -155,26 +156,38 @@ export default function DecisionCard({
         reply;
 
     return (
-        <div className="fade-up relative w-full overflow-hidden rounded-[28px] rounded-tl-lg border border-slate-200/70 bg-gradient-to-b from-orange-50/40 via-white to-white p-6 shadow-[0_6px_34px_rgba(15,23,42,0.06)]">
-            <div>
+        <div
+            className={`decision-card fade-up relative w-full overflow-hidden rounded-[30px] rounded-tl-lg border border-orange-100 bg-gradient-to-b from-orange-50/60 via-white to-white p-7 ring-1 ring-orange-100/70 sm:p-8 ${
+                streaming ? "" : "card-sheen"
+            }`}
+        >
+            {/* Warm accent bar — even, branded framing with no directional glow */}
+            <span className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#FF6B35] via-[#F7931E] to-[#FF6B35]" />
+
+            <div className="relative">
                 {/* AI COO persona */}
-                <div className="mb-3 flex items-center gap-2">
-                    <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_3px_10px_rgba(255,107,53,0.35)]">
-                        <Sparkles size={13} />
+                <div className="mb-4 flex items-center gap-2.5">
+                    <div className="relative grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_6px_16px_rgba(255,107,53,0.4)]">
+                        <Sparkles size={14} />
                     </div>
-                    <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gradient-warm">
                         AI COO
                     </span>
+                    <span className="flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#E85D2A] ring-1 ring-orange-100">
+                        <span className="live-dot h-1.5 w-1.5 rounded-full bg-[#FF6B35]" />
+                        {streaming ? "Thinking" : "Decision"}
+                    </span>
                 </div>
+
                 {/* Hero status + impact pill + voice button */}
                 <div className="flex items-start justify-between gap-3">
-                    <h3 className="font-display text-[28px] font-semibold leading-[1.15] tracking-tight text-slate-900">
+                    <h3 className="font-display text-[31px] font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-[34px]">
                         {status}
                         {streaming && <span className="caret" />}
                     </h3>
                     <div className="flex shrink-0 items-center gap-2">
                         {expected_impact && (
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 font-mono text-xs font-semibold text-emerald-600 ring-1 ring-emerald-100">
+                            <span className="rounded-full bg-gradient-to-b from-emerald-50 to-emerald-100/60 px-3 py-1 font-mono text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
                                 {expected_impact}
                             </span>
                         )}
@@ -182,7 +195,7 @@ export default function DecisionCard({
                             <button
                                 data-testid={TID.chatPlay(msgIdx ?? 0)}
                                 onClick={onPlayVoice}
-                                className="grid h-8 w-8 place-items-center rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                className="grid h-8 w-8 place-items-center rounded-full bg-orange-50 text-[#E85D2A] ring-1 ring-orange-100 transition-colors hover:bg-[#FF6B35] hover:text-white"
                                 title="Read aloud"
                             >
                                 {voicePlaying ? (
@@ -197,29 +210,29 @@ export default function DecisionCard({
 
                 {/* Tight rationale (reason + opportunity merged) */}
                 {(reason || opportunity) && (
-                    <p className="mt-3 border-l-2 border-orange-200/80 pl-3.5 text-[15px] leading-relaxed text-slate-600">
+                    <p className="mt-5 border-l-[3px] border-transparent pl-4 text-[15.5px] leading-[1.72] text-slate-600 [border-image:linear-gradient(180deg,#FF6B35,#F7931E)_1] [text-wrap:pretty]">
                         {reason}
                         {reason && opportunity && (
-                            <span className="text-slate-400"> &nbsp;·&nbsp; </span>
+                            <span className="text-orange-300"> &nbsp;·&nbsp; </span>
                         )}
                         {opportunity && (
-                            <span className="text-slate-700">{opportunity}</span>
+                            <span className="font-medium text-slate-800">{opportunity}</span>
                         )}
                     </p>
                 )}
 
-                {/* Metrics — compact stat tiles (label over value) */}
+                {/* Metrics — compact stat tiles (label over value) with a warm accent */}
                 {metrics.length > 0 && (
-                    <div className="mt-4 flex flex-wrap gap-2.5">
+                    <div className="mt-6 flex flex-wrap gap-3">
                         {metrics.map((m, i) => (
                             <div
                                 key={i}
-                                className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3.5 py-2"
+                                className="rounded-2xl border border-l-[3px] border-slate-200/80 border-l-[#FF6B35] bg-gradient-to-b from-white to-orange-50/40 px-4 py-2.5 shadow-[0_1px_3px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-l-[#E85D2A] hover:shadow-md"
                             >
                                 <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">
                                     {m.label}
                                 </div>
-                                <div className="mt-0.5 font-display text-lg font-semibold tabular-nums text-slate-900">
+                                <div className="mt-0.5 font-display text-xl font-semibold tabular-nums text-slate-900">
                                     {m.value}
                                 </div>
                             </div>
@@ -229,7 +242,7 @@ export default function DecisionCard({
 
                 {/* Actions */}
                 {actions.length > 0 && (
-                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                    <div className="mt-7 flex flex-wrap items-center gap-2.5 border-t border-orange-100/80 pt-6">
                         {actions.map((a, i) => (
                             <ActionButton
                                 key={a.id || i}

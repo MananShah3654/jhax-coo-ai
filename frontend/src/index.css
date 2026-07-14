@@ -29,7 +29,10 @@ body {
     font-family: "Manrope", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-feature-settings: "ss01", "cv01";
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "cv01", "cv11", "kern", "liga";
+    font-kerning: normal;
+    letter-spacing: -0.006em;
 }
 
 h1,
@@ -39,6 +42,17 @@ h4,
 h5,
 .font-display {
     font-family: "Fraunces", "Outfit", Georgia, serif;
+    font-optical-sizing: auto;
+    font-feature-settings: "kern", "liga", "calt", "ss01";
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+}
+
+/* Editorial italic accent — Fraunces reads beautifully in italic, so use it
+   for small flourishes (labels, pull phrases) without shouting. */
+.font-serif-italic {
+    font-family: "Fraunces", Georgia, serif;
+    font-style: italic;
     font-optical-sizing: auto;
     letter-spacing: -0.01em;
 }
@@ -169,6 +183,74 @@ h5,
 }
 .fade-up {
     animation: fade-up 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Premium Decision Card: soft ambient lift + a slow diagonal sheen that
+   sweeps once when the answer arrives, so a reply feels "delivered". */
+.decision-card {
+    box-shadow:
+        0 1px 2px rgba(15, 23, 42, 0.05),
+        0 10px 28px -8px rgba(255, 107, 53, 0.24),
+        0 30px 70px -26px rgba(15, 23, 42, 0.3);
+}
+
+@keyframes card-sheen {
+    0% {
+        transform: translateX(-120%) skewX(-18deg);
+        opacity: 0;
+    }
+    12% {
+        opacity: 0.7;
+    }
+    60%,
+    100% {
+        transform: translateX(220%) skewX(-18deg);
+        opacity: 0;
+    }
+}
+.card-sheen::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 45%;
+    height: 100%;
+    pointer-events: none;
+    /* Hidden by default; only visible mid-sweep. `both` fill-mode holds the
+       first/last keyframe (opacity 0, off-card) before and after the run so
+       the white band never parks over the left side of the card. */
+    opacity: 0;
+    background: linear-gradient(
+        100deg,
+        transparent,
+        rgba(255, 255, 255, 0.55),
+        transparent
+    );
+    animation: card-sheen 2.4s cubic-bezier(0.2, 0.7, 0.3, 1) 0.15s 1 both;
+}
+
+/* Warm gradient wordmark used for the AI COO label + accents. */
+.text-gradient-warm {
+    background: linear-gradient(92deg, #ff6b35, #f7931e);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* Gentle breathing dot to signal a "live" agent. */
+@keyframes live-pulse {
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.45;
+        transform: scale(0.82);
+    }
+}
+.live-dot {
+    animation: live-pulse 1.8s ease-in-out infinite;
 }
 
 ::selection {

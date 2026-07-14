@@ -248,13 +248,6 @@ export default function Home() {
                 <h2 className="font-display text-lg font-semibold tracking-tight text-slate-900">
                     Today&apos;s KPIs
                 </h2>
-                <button
-                    data-testid="home-view-kpis"
-                    onClick={() => navigate("/kpis")}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#E85D2A] hover:text-[#FF6B35]"
-                >
-                    View all metrics <ArrowRight size={13} />
-                </button>
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <KpiTile

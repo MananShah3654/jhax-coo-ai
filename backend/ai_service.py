@@ -29,7 +29,7 @@ from urllib.parse import quote
 
 from openai import AsyncOpenAI
 
-from analytics import restaurant_context
+from analytics import restaurant_context, menu_performance, today_kpis
 
 # LLM config — any OpenAI-compatible endpoint (Groq by default). See backend/.env.
 LLM_API_KEY  = os.environ.get("LLM_API_KEY", "")
@@ -271,6 +271,160 @@ async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
         parsed = {"subject": "Your Jha Bistro Update", "body": buf[:400], "cta": "Order Now",
                   "estimated_reach": 0, "estimated_revenue": 0}
     return parsed
+
+
+# -------- AI Combo builder (data-grounded, sales-optimized) --------
+
+def _charm_price(x: float) -> float:
+    """Round a price to a psychological charm price (…​.99 / …​.49)."""
+    base = int(x)  # floor for positive values
+    if base < 1:
+        return round(x, 2)
+    return round(base - 0.01 if (x - base) < 0.5 else base + 0.49, 2)
+
+
+def _assemble_combo(*, name: str, tagline: str, items: list[dict],
+                    combo_price, daypart: str, rationale: str,
+                    uplift_pct, today_revenue: float = 0.0) -> dict:
+    """Build the final combo dict with prices/savings recomputed from REAL menu
+    prices, so the offer math is always correct regardless of the LLM output."""
+    line_items = [{"name": m["name"], "category": m.get("category", ""),
+                   "price": round(float(m["price"]), 2)} for m in items]
+    regular_total = round(sum(li["price"] for li in line_items), 2)
+    # Keep the discount in a sensible 5%–25%-off band.
+    lo, hi = round(regular_total * 0.75, 2), round(regular_total * 0.95, 2)
+    try:
+        cp = float(combo_price)
+    except (TypeError, ValueError):
+        cp = 0.0
+    cp = round(regular_total * 0.85, 2) if cp <= 0 else min(max(cp, lo), hi)
+    cp = _charm_price(cp)
+    savings = round(regular_total - cp, 2)
+    savings_pct = round(savings / regular_total * 100, 1) if regular_total else 0.0
+    try:
+        uplift = int(uplift_pct)
+    except (TypeError, ValueError):
+        uplift = 8
+    uplift = min(max(uplift, 3), 20)
+    return {
+        "name": (name or "Best-Sellers Bundle")[:40],
+        "tagline": (tagline or "Your favourites, together for less.")[:90],
+        "items": line_items,
+        "regular_total": regular_total,
+        "combo_price": cp,
+        "savings": savings,
+        "savings_pct": savings_pct,
+        "target_daypart": daypart or "All day",
+        "rationale": (rationale or "")[:220],
+        "expected_uplift_pct": uplift,
+        "expected_daily_revenue": int(round(today_revenue * uplift / 100)),
+    }
+
+
+def _fallback_combo(top: list[dict], today_revenue: float = 0.0) -> dict:
+    """Deterministic combo used when the LLM is unavailable or returns junk:
+    the top revenue items across distinct categories, so it's always relevant."""
+    picked, seen = [], set()
+    for m in top:
+        if m.get("category") in seen:
+            continue
+        seen.add(m.get("category"))
+        picked.append(m)
+        if len(picked) == 3:
+            break
+    if len(picked) < 2:
+        picked = top[:2]
+    return _assemble_combo(
+        name="Best-Sellers Bundle",
+        tagline="Pair your top picks and save.",
+        items=picked,
+        combo_price=None,
+        daypart="All day",
+        rationale="Bundles your highest-revenue items across courses to lift "
+                  "average order value with proven crowd-pleasers.",
+        uplift_pct=8,
+        today_revenue=today_revenue,
+    )
+
+
+async def generate_combo(focus: str | None = None) -> dict:
+    """Auto-generate an optimized product combo from current sales trends and the
+    best-selling products. The LLM chooses complementary items and writes the
+    offer; pricing/savings are recomputed from real menu prices for accuracy."""
+    ranked = menu_performance(30)
+    if not ranked:
+        return _assemble_combo(name="Combo", tagline="", items=[], combo_price=None,
+                               daypart="All day", rationale="", uplift_pct=8)
+    top = ranked[:8]
+    by_name = {m["name"].strip().lower(): m for m in ranked}
+    kpis = today_kpis()
+    today_revenue = float(kpis.get("revenue", 0) or 0)
+
+    fallback = _fallback_combo(top, today_revenue)
+    if not LLM_API_KEY:
+        return fallback
+
+    catalog = [
+        {"name": m["name"], "category": m["category"], "price": round(m["price"], 2),
+         "units_sold_30d": m["units_sold"], "margin_pct": m["margin_pct"]}
+        for m in top
+    ]
+    trend_wk = kpis.get("vs_last_week_pct", 0)
+    trend_dir = "up" if trend_wk > 0 else "down" if trend_wk < 0 else "flat"
+    focus_line = f" The owner wants to focus on: {focus.strip()}." if focus else ""
+
+    system = (
+        "You are a restaurant menu-strategy expert for a casual upscale bistro "
+        "called 'Jha Bistro'. Design ONE bundled combo offer that increases sales "
+        "and average order value. Pick 2-4 COMPLEMENTARY items (e.g. a main + a "
+        "side + a drink or dessert) ONLY from the provided best-seller catalog. "
+        "Prefer high-margin items and pairings that suit the current sales trend. "
+        "Return STRICT JSON ONLY with keys: name (string, <=40 chars, catchy), "
+        "tagline (string, <=90 chars), item_names (array of 2-4 strings copied "
+        "EXACTLY from the catalog names), combo_price (number, LESS than the sum "
+        "of the chosen item prices), target_daypart (one of: Breakfast, Lunch, "
+        "Dinner, All day), rationale (string, <=200 chars, why this bundle sells "
+        "given the trend), expected_uplift_pct (integer 3-20). No prose outside JSON."
+    )
+    user = (
+        f"Best-seller catalog (last 30 days):\n{json.dumps(catalog)}\n\n"
+        f"Sales trend vs last week: {trend_wk}% ({trend_dir}). "
+        f"Today revenue ${today_revenue:.0f}, "
+        f"avg order ${kpis.get('avg_order_value', 0):.2f}.{focus_line}"
+    )
+    try:
+        resp = await _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            temperature=0.8,
+        )
+        parsed = parse_coo_json(resp.choices[0].message.content or "")
+    except Exception:
+        return fallback
+
+    # Map the model's picks back to real menu items; drop anything unrecognised.
+    items, seen_ids = [], set()
+    for n in (parsed.get("item_names") or []):
+        if not isinstance(n, str):
+            continue
+        m = by_name.get(n.strip().lower())
+        if m and m["id"] not in seen_ids:
+            seen_ids.add(m["id"])
+            items.append(m)
+    if len(items) < 2:
+        return fallback
+
+    return _assemble_combo(
+        name=parsed.get("name") or fallback["name"],
+        tagline=parsed.get("tagline") or fallback["tagline"],
+        items=items[:4],
+        combo_price=parsed.get("combo_price"),
+        daypart=parsed.get("target_daypart") or "All day",
+        rationale=parsed.get("rationale") or fallback["rationale"],
+        uplift_pct=parsed.get("expected_uplift_pct"),
+        today_revenue=today_revenue,
+    )
 
 
 # -------- Promotional banner (free text-to-image) --------

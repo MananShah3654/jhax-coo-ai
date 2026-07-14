@@ -38,7 +38,6 @@ export const TID = {
 
     // Layout
     navHome: "nav-home",
-    navKpis: "nav-kpis",
     navChat: "nav-chat",
     navBranches: "nav-branches",
     navCustomers: "nav-customers",
@@ -93,4 +92,8 @@ export const TID = {
     campBannerGenerate: "camp-banner-generate",
     campBannerImg: "camp-banner-img",
     campBannerRegenerate: "camp-banner-regenerate",
+    comboGenerate: "combo-generate",
+    comboResult: "combo-result",
+    comboRegenerate: "combo-regenerate",
+    comboLaunch: "combo-launch",
 };

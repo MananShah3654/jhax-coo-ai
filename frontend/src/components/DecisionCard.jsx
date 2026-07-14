@@ -196,20 +196,20 @@ export default function DecisionCard({
                     </p>
                 )}
 
-                {/* Metrics chips */}
+                {/* Metrics — compact stat tiles (label over value) */}
                 {metrics.length > 0 && (
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2.5">
                         {metrics.map((m, i) => (
                             <div
                                 key={i}
-                                className="rounded-lg bg-slate-50 px-3 py-1.5"
+                                className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-3.5 py-2"
                             >
-                                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
-                                    {m.label}{" "}
-                                </span>
-                                <span className="ml-1 font-display text-sm font-semibold text-slate-900">
+                                <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                    {m.label}
+                                </div>
+                                <div className="mt-0.5 font-display text-lg font-semibold tabular-nums text-slate-900">
                                     {m.value}
-                                </span>
+                                </div>
                             </div>
                         ))}
                     </div>

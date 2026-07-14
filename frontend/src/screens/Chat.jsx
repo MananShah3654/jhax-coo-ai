@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Send, AlertTriangle, Plus, Trash2, MessageSquare, X, Menu as MenuIcon } from "lucide-react";
+import { Send, AlertTriangle, Plus, Trash2, MessageSquare, X, Menu as MenuIcon, Sparkles, ArrowUpRight } from "lucide-react";
 import { API } from "@/lib/api";
 import Layout from "@/components/Layout";
 import DecisionCard from "@/components/DecisionCard";
@@ -306,11 +306,18 @@ export default function Chat() {
                     >
                         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
                             {messages.length === 0 && (
-                                <div className="rounded-3xl border border-dashed border-slate-200 p-10 text-center">
-                                    <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">
-                                        Try asking
+                                <div className="fade-up mx-auto mt-8 max-w-2xl text-center">
+                                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_8px_24px_rgba(255,107,53,0.35)]">
+                                        <Sparkles size={22} />
                                     </div>
-                                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                    <h2 className="mt-5 font-display text-3xl font-semibold tracking-tight text-slate-900">
+                                        What would you like to know?
+                                    </h2>
+                                    <p className="mx-auto mt-2 max-w-md text-[15px] leading-relaxed text-slate-500">
+                                        Ask about revenue, customers, menu, or operations —
+                                        one question, one answer, one action.
+                                    </p>
+                                    <div className="mt-7 grid gap-2.5 text-left sm:grid-cols-2">
                                         {[
                                             "How is my business today?",
                                             "Why are sales down?",
@@ -322,9 +329,13 @@ export default function Chat() {
                                             <button
                                                 key={s}
                                                 onClick={() => ask(s)}
-                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
+                                                className="group flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left text-sm text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#FF6B35]/50 hover:text-[#E85D2A] hover:shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
                                             >
-                                                {s}
+                                                <span>{s}</span>
+                                                <ArrowUpRight
+                                                    size={15}
+                                                    className="shrink-0 text-slate-300 transition-colors group-hover:text-[#FF6B35]"
+                                                />
                                             </button>
                                         ))}
                                     </div>
@@ -360,11 +371,15 @@ export default function Chat() {
                                                 voicePlaying={voicePlaying === i}
                                             />
                                         ) : (
-                                            <div className="rounded-3xl border border-slate-200 bg-white p-6">
-                                                <div className="flex items-center gap-2 text-sm text-slate-400">
-                                                    <span className="h-2 w-2 animate-pulse rounded-full bg-[#FF6B35]" />
-                                                    Thinking…
+                                            <div className="fade-up flex items-center gap-3 rounded-3xl rounded-tl-md border border-slate-200/70 bg-white px-6 py-5 shadow-[0_2px_18px_rgba(15,23,42,0.04)]">
+                                                <div className="flex gap-1">
+                                                    <span className="h-2 w-2 animate-bounce rounded-full bg-[#FF6B35] [animation-delay:-0.3s]" />
+                                                    <span className="h-2 w-2 animate-bounce rounded-full bg-[#FF6B35] [animation-delay:-0.15s]" />
+                                                    <span className="h-2 w-2 animate-bounce rounded-full bg-[#FF6B35]" />
                                                 </div>
+                                                <span className="text-sm text-slate-400">
+                                                    Reading your restaurant's data…
+                                                </span>
                                             </div>
                                         )}
                                     </div>

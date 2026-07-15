@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { Mail, Phone, Loader2 } from "lucide-react";
 import Logo from "@/components/Logo";
@@ -73,9 +74,6 @@ export default function Login() {
                         {tab === "email" ? <EmailForm /> : <PhoneForm />}
                     </div>
                 </div>
-
-                {/* reCAPTCHA anchor for Firebase phone auth (invisible). */}
-                <div id="recaptcha-container" />
 
                 <p className="mt-6 text-center text-xs uppercase tracking-[0.25em] text-slate-400">
                     Ask Your Restaurant Anything
@@ -211,23 +209,28 @@ function EmailForm() {
 }
 
 function PhoneForm() {
-    const { sendPhoneOtp, confirmPhone } = useAuth();
+    const { sendPhoneOtp, verifyPhoneOtp } = useAuth();
     const navigate = useNavigate();
     const [phone, setPhone] = useState("");
     const [code, setCode] = useState("");
-    const [confirmation, setConfirmation] = useState(null);
+    const [codeSent, setCodeSent] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+
+    // Backend (Twilio/Firebase) errors carry a `detail`; a Firebase custom-token
+    // sign-in error carries a `code` that friendly() knows how to phrase.
+    const errMsg = (ex) => ex?.response?.data?.detail || friendly(ex);
 
     const send = async (e) => {
         e.preventDefault();
         setBusy(true);
         setErr(null);
         try {
-            const result = await sendPhoneOtp(phone.trim());
-            setConfirmation(result);
+            await sendPhoneOtp(phone.trim());
+            setCodeSent(true);
+            toast.success(`Code sent to ${phone.trim()}`);
         } catch (ex) {
-            setErr(friendly(ex));
+            setErr(errMsg(ex));
         } finally {
             setBusy(false);
         }
@@ -238,16 +241,16 @@ function PhoneForm() {
         setBusy(true);
         setErr(null);
         try {
-            await confirmPhone(confirmation, code.trim());
+            await verifyPhoneOtp(phone.trim(), code.trim());
             navigate("/home");
         } catch (ex) {
-            setErr(friendly(ex));
+            setErr(errMsg(ex));
         } finally {
             setBusy(false);
         }
     };
 
-    if (!confirmation) {
+    if (!codeSent) {
         return (
             <form onSubmit={send} className="space-y-3">
                 <input
@@ -302,7 +305,7 @@ function PhoneForm() {
             <button
                 type="button"
                 onClick={() => {
-                    setConfirmation(null);
+                    setCodeSent(false);
                     setCode("");
                     setErr(null);
                 }}

@@ -17,6 +17,7 @@ Endpoints (all under /api):
   POST /ai/tts                    - text -> audio (OpenAI TTS)
   POST /campaigns/generate        - AI-drafted campaign
   POST /campaigns/image           - AI promotional banner (free text-to-image)
+  POST /combos/generate           - AI product combo (data-grounded, sales-optimized)
   POST /actions/execute           - execute one-click actions (mocked: SMS/Email/...)
   GET  /reports/{type}            - generate text report (markdown)
 """
@@ -50,13 +51,14 @@ from analytics import (  # noqa: E402
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
-    build_campaign_image, parse_coo_json,
+    build_campaign_image, generate_combo, parse_coo_json,
 )
 from pdf_report import build_report_pdf  # noqa: E402
 from database import (  # noqa: E402
     User, get_db, init_db, set_user_pin, verify_user_pin,
 )
 from auth import get_current_user  # noqa: E402
+from twilio_auth import router as twilio_auth_router  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 # No module-global data source anymore: each request builds an owner-scoped
@@ -86,6 +88,12 @@ class CampaignImageRequest(BaseModel):
     description: str
     style: str | None = "photorealistic"
     seed: int | None = None
+
+
+class ComboRequest(BaseModel):
+    # Optional hint (e.g. the current campaign goal). Combos are generated from
+    # live sales trends + best-sellers even when this is empty.
+    focus: str | None = None
 
 
 class TTSRequest(BaseModel):
@@ -199,6 +207,10 @@ async def dashboard(user: User = Depends(get_current_user)):
     return {
         "owner": {"name": user.name, "restaurant": user.restaurant_name},
         "today": today_kpis(src),
+        # Repeat Customer Rate is a cohort snapshot (not a daily window), so it
+        # comes from customer_intelligence rather than today_kpis — surfaced here
+        # so the dashboard can show all headline KPIs from one call.
+        "repeat_rate_pct": customer_intelligence(src)["repeat_rate_pct"],
         "health": health_score(src),
         "briefing": daily_briefing(src),
         "branches_top3": branch_performance(src, 7)[:3],
@@ -364,6 +376,16 @@ async def campaigns_image(
         raise HTTPException(500, f"Banner generation failed: {e}")
 
 
+@api.post("/combos/generate")
+async def combos_generate(req: ComboRequest):
+    """AI product combo optimized from current sales trends + best-sellers."""
+    try:
+        return await generate_combo(req.focus)
+    except Exception as e:
+        logger.exception("Combo generation error")
+        raise HTTPException(500, f"Combo generation failed: {e}")
+
+
 @api.post("/actions/execute")
 async def execute_action(req: ActionRequest, user: User = Depends(get_current_user)):
     # All side-effect actions are mocked - in production they'd hit JhaPay SMS/Email/Push.
@@ -466,7 +488,7 @@ async def _on_startup():
 from crud_routes import crud  # noqa: E402
 
 app.include_router(api)
-app.include_router(crud)
+app.include_router(twilio_auth_router)  # /api/auth/send-otp, /api/auth/verify-otp
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

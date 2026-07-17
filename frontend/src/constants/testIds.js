@@ -37,6 +37,12 @@ export const TID = {
     unlockForgot: "unlock-forgot",
 
     // Layout
+    waSend: "wa-send",
+    waApproval: "wa-approval",
+    waApprove: "wa-approve",
+    waResult: "wa-result",
+    waNotConfigured: "wa-not-configured",
+
     campCopyWhatsapp: "camp-copy-whatsapp",
     campCopyCaption: "camp-copy-caption",
     campDownloadInstagram: "camp-download-instagram",

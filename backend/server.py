@@ -56,8 +56,9 @@ from ai_service import (  # noqa: E402
 )
 from pdf_report import build_report_pdf  # noqa: E402
 from database import (  # noqa: E402
-    User, get_db, init_db, set_user_pin, verify_user_pin,
+    SentCampaign, User, get_db, init_db, set_user_pin, verify_user_pin,
 )
+import whatsapp  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from twilio_auth import router as twilio_auth_router  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
@@ -95,6 +96,18 @@ class CampaignImageRequest(BaseModel):
     description: str
     style: str | None = "photorealistic"
     seed: int | None = None
+
+
+class WhatsAppPreviewRequest(BaseModel):
+    audience: str                    # vip | at_risk | new | all
+    message: str
+    banner_url: str | None = None
+
+
+class WhatsAppSendRequest(WhatsAppPreviewRequest):
+    # Must be explicitly true. The owner approves in the UI after seeing the
+    # audience count and message preview; there is no silent auto-send path.
+    approved: bool = False
 
 
 class SquarePromoRequest(BaseModel):
@@ -405,6 +418,103 @@ async def combos_generate(req: ComboRequest):
     except Exception as e:
         logger.exception("Combo generation error")
         raise HTTPException(500, f"Combo generation failed: {e}")
+
+
+_WA_TEMPLATE_CAVEAT = (
+    "Meta only allows free-form WhatsApp messages within 24 hours of a customer's "
+    "last reply. Outside that window a pre-approved message template is required, "
+    "so most promo sends to lapsed customers will be rejected with error 131047. "
+    "Templates aren't wired up yet — sends are attempted as free-form text and "
+    "Meta's verdict is reported as-is."
+)
+
+
+@api.get("/campaigns/whatsapp/status")
+async def whatsapp_status():
+    """Whether WhatsApp is usable, and why not if it isn't."""
+    return {**whatsapp.config_status(), "template_caveat": _WA_TEMPLATE_CAVEAT}
+
+
+@api.post("/campaigns/whatsapp/preview")
+async def whatsapp_preview(req: WhatsAppPreviewRequest):
+    """Audience size + exact message — the approval gate. Sends NOTHING."""
+    aud = whatsapp.resolve_audience(DS.customers(), req.audience)
+    body = req.message if not req.banner_url else f"{req.message}\n\n{req.banner_url}"
+    return {
+        **whatsapp.config_status(),
+        "audience": aud["audience"],
+        "matched": aud["matched"],
+        "recipient_count": len(aud["recipients"]),
+        # A few real numbers so the owner can sanity-check who this reaches.
+        "sample_recipients": aud["recipients"][:5],
+        "unreachable": aud["unreachable"],
+        "duplicates": aud["duplicates"],
+        "message_preview": body,
+        "banner_url": req.banner_url,
+        "template_caveat": _WA_TEMPLATE_CAVEAT,
+        "requires_approval": True,
+    }
+
+
+@api.post("/campaigns/whatsapp/send")
+async def whatsapp_send(req: WhatsAppSendRequest, db: Session = Depends(get_db)):
+    """Send the broadcast — only with explicit owner approval.
+
+    Logs to sent_campaigns ONLY when a real send was attempted, so the Campaign
+    ROI screen never shows a campaign that didn't go out. A refusal (not
+    approved / not configured / nobody reachable) writes nothing.
+    """
+    if not req.approved:
+        raise HTTPException(400, "Owner approval required before sending.")
+    if not whatsapp.is_configured():
+        # Honest refusal — not an exception, so the UI can render the state.
+        return {
+            "ok": False, "sent": 0, "failed": 0, "logged": False,
+            "error": "WhatsApp not configured",
+            **whatsapp.config_status(),
+            "template_caveat": _WA_TEMPLATE_CAVEAT,
+        }
+    aud = whatsapp.resolve_audience(DS.customers(), req.audience)
+    if not aud["recipients"]:
+        return {
+            "ok": False, "sent": 0, "failed": 0, "logged": False,
+            "configured": True,
+            "error": f"No reachable recipients in '{aud['audience']}'.",
+            "unreachable": aud["unreachable"],
+        }
+
+    result = whatsapp.send_broadcast(aud["recipients"], req.message, req.banner_url)
+
+    status = "sent" if result["sent"] and not result["failed"] else \
+             "partial" if result["sent"] else "failed"
+    row = SentCampaign(
+        audience=aud["audience"],
+        channel="whatsapp",
+        message=req.message[:4096],
+        banner_url=req.banner_url,
+        recipient_count=len(aud["recipients"]),
+        sent_count=result["sent"],
+        failed_count=result["failed"],
+        status=status,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    logger.info("WhatsApp broadcast %s: %s sent, %s failed (audience=%s)",
+                status, result["sent"], result["failed"], aud["audience"])
+    return {
+        "ok": result["ok"],
+        "configured": True,
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "recipients": len(aud["recipients"]),
+        "status": status,
+        "needs_template": result.get("needs_template", 0),
+        "error": result.get("error"),
+        "logged": True,
+        "campaign": row.as_dict(),
+        "template_caveat": _WA_TEMPLATE_CAVEAT,
+    }
 
 
 @api.post("/promotions/square-push")

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import Layout from "@/components/Layout";
-import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download, Copy, CheckCircle2, Instagram, MessageCircle } from "lucide-react";
+import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download, Copy, CheckCircle2, Instagram, MessageCircle, AlertTriangle } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
@@ -41,7 +41,8 @@ function whatsappText(draft) {
 function instagramCaption(draft) {
     if (!draft) return "";
     return stripMarkdown(
-        [draft.subject, draft.cta && `👉 ${draft.cta}`].filter(Boolean).join("\n\n"),
+        [draft.subject, draft.cta && `👉 ${draft.cta}`].filter(Boolean).
+        join("\n\n"),
     );
 }
 
@@ -53,6 +54,7 @@ const AUDIENCES = [
 ];
 const CHANNELS = [
     { id: "sms", label: "SMS" },
+    
     { id: "email", label: "Email" },
     { id: "push", label: "Push" },
     { id: "loyalty", label: "Loyalty" },
@@ -79,6 +81,18 @@ export default function Marketing() {
     const [bannerBusy, setBannerBusy] = useState(false);
     const [imgLoading, setImgLoading] = useState(false);
     const [downloading, setDownloading] = useState(false);
+
+    // WhatsApp broadcast: status -> preview (approval gate) -> send
+    const [waStatus, setWaStatus] = useState(null);   // {configured, missing, hint}
+    const [waPreview, setWaPreview] = useState(null); // audience + message to approve
+    const [waBusy, setWaBusy] = useState(false);
+    const [waResult, setWaResult] = useState(null);
+
+    useEffect(() => {
+        api.get("/campaigns/whatsapp/status")
+            .then((r) => setWaStatus(r.data))
+            .catch(() => setWaStatus({ configured: false, missing: ["unknown"] }));
+    }, []);
 
 
     // Pick up prefill from /home → Launch Campaign or from an AI action button
@@ -180,6 +194,51 @@ export default function Marketing() {
             toast.error("Download failed — use “Open full size” and save it manually");
         } finally {
             setDownloading(false);
+        }
+    };
+
+    // Step 1 of the broadcast: fetch who this reaches and the exact text.
+    // Sends nothing — the owner must approve what this returns.
+    const previewBroadcast = async () => {
+        setWaBusy(true);
+        setWaResult(null);
+        try {
+            const { data } = await api.post("/campaigns/whatsapp/preview", {
+                audience,
+                message: whatsappText(draft),
+                banner_url: banner?.url || null,
+            });
+            setWaPreview(data);
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Couldn't load the audience");
+        } finally {
+            setWaBusy(false);
+        }
+    };
+
+    // Step 2: only reachable from the preview panel, and only with approved:true.
+    const confirmBroadcast = async () => {
+        setWaBusy(true);
+        try {
+            const { data } = await api.post("/campaigns/whatsapp/send", {
+                audience,
+                message: whatsappText(draft),
+                banner_url: banner?.url || null,
+                approved: true,
+            });
+            setWaResult(data);
+            setWaPreview(null);
+            if (data.ok) {
+                toast.success(`Sent to ${data.sent} of ${data.recipients}`);
+            } else {
+                toast.error(data.error || "WhatsApp did not accept the broadcast");
+            }
+        } catch (e) {
+            const detail = e?.response?.data?.detail || e?.message || "Send failed";
+            setWaResult({ ok: false, error: detail, sent: 0, failed: 0 });
+            toast.error(detail);
+        } finally {
+            setWaBusy(false);
         }
     };
 
@@ -390,6 +449,142 @@ export default function Marketing() {
                                 <p className="mt-3 text-xs text-slate-500">
                                     Come back in 48 hours — we’ll show you if revenue moved.
                                 </p>
+
+                                {/* --- WhatsApp Broadcast --- */}
+                                <div className="mt-4 border-t border-slate-200 pt-4">
+                                    {waStatus && !waStatus.configured ? (
+                                        <div
+                                            data-testid={TID.waNotConfigured}
+                                            className="rounded-xl border border-amber-200 bg-amber-50 p-3"
+                                        >
+                                            <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                                                <AlertTriangle size={13} /> WhatsApp not
+                                                configured
+                                            </div>
+                                            <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                                                Missing{" "}
+                                                <code className="font-mono">
+                                                    {(waStatus.missing || []).join(", ")}
+                                                </code>
+                                                . {waStatus.hint}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            data-testid={TID.waSend}
+                                            onClick={previewBroadcast}
+                                            disabled={waBusy || !draft}
+                                            className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2 text-sm font-medium text-white hover:bg-[#1FAF54] disabled:opacity-50"
+                                        >
+                                            {waBusy ? (
+                                                <Loader2 size={13} className="animate-spin" />
+                                            ) : (
+                                                <MessageCircle size={13} />
+                                            )}
+                                            Send to WhatsApp Broadcast
+                                        </button>
+                                    )}
+
+                                    {/* Approval gate — nothing sends until this is confirmed. */}
+                                    {waPreview && (
+                                        <div
+                                            data-testid={TID.waApproval}
+                                            className="mt-3 rounded-xl border border-slate-300 bg-white p-3"
+                                        >
+                                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                                Approve before sending
+                                            </div>
+                                            <p className="mt-2 text-sm text-slate-800">
+                                                Send to{" "}
+                                                <b>{waPreview.recipient_count}</b>{" "}
+                                                {waPreview.recipient_count === 1
+                                                    ? "person"
+                                                    : "people"}{" "}
+                                                in <b>{waPreview.audience}</b>?
+                                            </p>
+                                            <p className="mt-0.5 text-[11px] text-slate-500">
+                                                {waPreview.matched} in segment
+                                                {waPreview.duplicates > 0 &&
+                                                    ` · ${waPreview.duplicates} duplicate number${waPreview.duplicates === 1 ? "" : "s"} removed`}
+                                                {waPreview.unreachable > 0 &&
+                                                    ` · ${waPreview.unreachable} with no usable number`}
+                                            </p>
+                                            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-2 font-sans text-[11px] leading-relaxed text-slate-700">
+                                                {waPreview.message_preview}
+                                            </pre>
+                                            <p className="mt-2 text-[10px] leading-relaxed text-amber-700">
+                                                ⚠ {waPreview.template_caveat}
+                                            </p>
+                                            <div className="mt-3 flex gap-2">
+                                                <button
+                                                    data-testid={TID.waApprove}
+                                                    onClick={confirmBroadcast}
+                                                    disabled={
+                                                        waBusy ||
+                                                        !waPreview.recipient_count
+                                                    }
+                                                    className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-2 text-sm font-medium text-white hover:bg-[#1FAF54] disabled:opacity-50"
+                                                >
+                                                    {waBusy ? (
+                                                        <Loader2
+                                                            size={13}
+                                                            className="animate-spin"
+                                                        />
+                                                    ) : (
+                                                        <CheckCircle2 size={13} />
+                                                    )}
+                                                    Approve &amp; send
+                                                </button>
+                                                <button
+                                                    onClick={() => setWaPreview(null)}
+                                                    disabled={waBusy}
+                                                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 disabled:opacity-50"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Whatever WhatsApp actually said. */}
+                                    {waResult && (
+                                        <div
+                                            data-testid={TID.waResult}
+                                            className={`mt-3 rounded-xl border p-3 text-xs ${
+                                                waResult.ok
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                                    : "border-red-200 bg-red-50 text-red-700"
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-1.5 font-semibold">
+                                                {waResult.ok ? (
+                                                    <>
+                                                        <CheckCircle2 size={13} /> Sent
+                                                        {" "}
+                                                        {waResult.sent}/
+                                                        {waResult.recipients}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <AlertTriangle size={13} /> Not sent
+                                                    </>
+                                                )}
+                                            </div>
+                                            {waResult.error && (
+                                                <div className="mt-1 break-words">
+                                                    {waResult.error}
+                                                </div>
+                                            )}
+                                            {waResult.needs_template > 0 && (
+                                                <div className="mt-1">
+                                                    {waResult.needs_template} rejected:
+                                                    outside Meta’s 24h window, where an
+                                                    approved template is required.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}

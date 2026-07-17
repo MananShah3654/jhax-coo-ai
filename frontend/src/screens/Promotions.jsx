@@ -11,9 +11,10 @@
  */
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle, Wand2 } from "lucide-react";
 import Layout from "@/components/Layout";
 import { api, fmtUsd } from "@/lib/api";
+import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
 const PREFILL_KEY = "promotion_prefill";
@@ -52,6 +53,9 @@ export default function Promotions() {
     const [busy, setBusy] = useState(false);
     const [pushBusy, setPushBusy] = useState(false);
     const [pushResult, setPushResult] = useState(null);
+    // AI-suggested combo (from live sales data), shown alongside the manual presets
+    const [aiBusy, setAiBusy] = useState(false);
+    const [aiNote, setAiNote] = useState(null);
 
     // Load menu items for picker
     useEffect(() => {
@@ -99,6 +103,43 @@ export default function Promotions() {
         setItems(p.items);
         setDiscount(p.discount);
         setAudience(p.audience);
+        setAiNote(null);
+    };
+
+    // Build a combo from live sales data (best-sellers + trends) and pour it
+    // into the manual builder, which stays fully editable afterwards.
+    const aiSuggest = async () => {
+        setAiBusy(true);
+        setAiNote(null);
+        try {
+            const { data } = await api.post("/combos/generate", { focus: null });
+            const suggested = (data.items || []).map((i) => i.name).filter(Boolean);
+            // The builder prices items by matching their NAME against the menu,
+            // so a name that isn't on the menu would vanish from the economics
+            // without a trace. Keep only what we can actually price, and say so.
+            const known = suggested.filter((n) => menu.some((m) => m.name === n));
+            const dropped = suggested.filter((n) => !menu.some((m) => m.name === n));
+            if (!known.length) {
+                toast.error("AI suggested items that aren't on your menu");
+                return;
+            }
+            setItems(known);
+            if (data.name) setName(data.name);
+            if (typeof data.savings_pct === "number") {
+                setDiscount(Math.max(1, Math.min(60, Math.round(data.savings_pct))));
+            }
+            if (data.target_daypart) setAudience(data.target_daypart);
+            setAiNote({
+                rationale: data.rationale || "",
+                daypart: data.target_daypart || "",
+                dropped,
+            });
+            toast.success("Combo built from your sales data");
+        } catch {
+            toast.error("Couldn't reach the AI combo builder");
+        } finally {
+            setAiBusy(false);
+        }
     };
 
     const launch = async () => {
@@ -158,7 +199,23 @@ export default function Promotions() {
                 Design a combo in 30 seconds
             </h1>
 
-            <div className="mt-2 flex flex-wrap gap-2">
+            {/* AI suggestion sits alongside the hand-made presets — both fill the
+                same builder, and everything stays editable afterwards. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                    data-testid={TID.promoAiSuggest}
+                    onClick={aiSuggest}
+                    disabled={aiBusy || menu.length === 0}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                    {aiBusy ? (
+                        <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                        <Wand2 size={12} />
+                    )}
+                    {aiBusy ? "Reading your sales…" : "Generate from sales data"}
+                </button>
+                <span className="text-[11px] text-slate-400">or start from a preset:</span>
                 {PRESETS.map((p) => (
                     <button
                         key={p.id}
@@ -170,6 +227,35 @@ export default function Promotions() {
                     </button>
                 ))}
             </div>
+
+            {aiNote && (
+                <div
+                    data-testid={TID.promoAiNote}
+                    className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-600"
+                >
+                    <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+                        <Wand2 size={12} /> Built from your last 30 days of sales
+                    </div>
+                    {aiNote.rationale && (
+                        <p className="mt-1 leading-relaxed">{aiNote.rationale}</p>
+                    )}
+                    {aiNote.daypart && (
+                        <p className="mt-1 text-slate-400">
+                            Best daypart: {aiNote.daypart}
+                        </p>
+                    )}
+                    {aiNote.dropped.length > 0 && (
+                        <p className="mt-1 text-amber-700">
+                            Skipped {aiNote.dropped.join(", ")} — not on your menu, so it
+                            couldn’t be priced.
+                        </p>
+                    )}
+                    <p className="mt-1 text-slate-400">
+                        Everything below is editable — adjust items or the discount
+                        before launching.
+                    </p>
+                </div>
+            )}
 
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[1fr_360px]">
                 {/* Builder */}

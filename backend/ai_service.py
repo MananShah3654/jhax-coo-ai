@@ -93,6 +93,28 @@ Prefer "promotion" over "campaign" when the action is about menu items / bundles
 combos / discounts. Use "campaign" when it's about outbound messaging to a customer
 segment (SMS / email / push).
 
+SALES & ORDERS PLAYBOOK (these are the two most common questions — answer them well):
+
+Sales / revenue ("how are sales", "revenue this week", "why is revenue down"):
+- Headline the number from today.revenue; read the trend from today.vs_yesterday_pct
+  and today.vs_last_week_pct.
+- ALWAYS decompose a revenue move into its two drivers: revenue = orders x average order
+  value. Use today.orders_vs_last_week_pct and today.aov_vs_last_week_pct to say WHICH
+  driver moved. "Revenue -8%: orders fell 11%, AOV held" is a real answer; "sales are
+  down" is not. Put the driver in `reason`.
+- "This week"/trend -> sales_30d.by_day_14d. "Where do sales come from" ->
+  sales_30d.by_channel. "When are we busy" -> sales_30d.by_hour + operations.peak_hours.
+
+Orders ("how many orders", "orders dropped", "order volume"):
+- Count from today.orders; trend from today.orders_vs_yesterday_pct /
+  orders_vs_last_week_pct.
+- Explain a drop using operations.slow_hours and sales_30d.by_channel (which daypart or
+  channel is weak), and make `action` a demand lever (promo in a slow hour, channel push)
+  — never just restate the count.
+
+Menu / best-seller: use top_menu_30d (units_sold, revenue, margin_pct) and
+bottom_menu_30d. Push a "promotion" action for menu/combo/discount levers.
+
 RULES:
 - Be decisive. No hedging, no "it depends".
 - Ground every number in the RESTAURANT_CONTEXT provided in the user turn.
@@ -146,13 +168,6 @@ def parse_coo_json(text: str) -> dict:
     }
 
 
-async def _raise_for_stream(resp: httpx.Response) -> None:
-    """Read + raise a helpful error when a streaming call returns non-2xx."""
-    if resp.status_code >= 400:
-        body = (await resp.aread()).decode("utf-8", "ignore")
-        raise RuntimeError(f"LLM error {resp.status_code}: {body[:400]}")
-
-
 async def stream_coo_reply(session_id: str, user_text: str) -> AsyncGenerator[str, None]:
     """Yield raw token strings as the model generates them (SSE-friendly)."""
     stream = await _client.chat.completions.create(
@@ -193,7 +208,7 @@ async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
     buf = resp.choices[0].message.content or ""
     parsed = parse_coo_json(buf)
     if "subject" not in parsed:
-        parsed = {"subject": "Your Jha Bistro Update", "body": content[:400], "cta": "Order Now",
+        parsed = {"subject": "Your Jha Bistro Update", "body": buf[:400], "cta": "Order Now",
                   "estimated_reach": 0, "estimated_revenue": 0}
     return parsed
 
@@ -221,9 +236,9 @@ async def _enhance_image_prompt(description: str, style: str) -> str:
     if not LLM_API_KEY:
         return base
     try:
-        payload = {
-            "model": LLM_MODEL,
-            "messages": [
+        resp = await _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": (
                     "You write concise text-to-image prompts for restaurant "
                     "promotional banners. Reply with ONE prompt, max 55 words, "
@@ -236,17 +251,11 @@ async def _enhance_image_prompt(description: str, style: str) -> str:
                     f"Preferred style: {style}."
                 )},
             ],
-            "temperature": 0.8,
-            "max_tokens": 160,
-        }
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.post(
-                f"{LLM_API_BASE}/chat/completions", headers=_headers(), json=payload,
-            )
-            if r.status_code >= 400:
-                return base
-            txt = (r.json()["choices"][0]["message"]["content"] or "").strip()
-            return txt or base
+            temperature=0.8,
+            max_tokens=160,
+        )
+        txt = (resp.choices[0].message.content or "").strip()
+        return txt or base
     except Exception:
         return base
 

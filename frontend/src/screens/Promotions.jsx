@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle, Wand2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle, Wand2, Clock, AlertTriangle } from "lucide-react";
 import Layout from "@/components/Layout";
 import { api, fmtUsd } from "@/lib/api";
 import { TID } from "@/constants/testIds";
@@ -228,30 +228,48 @@ export default function Promotions() {
                 ))}
             </div>
 
+            {/* Echoes the Home briefing card's treatment — warm gradient, soft
+                orb, orange eyebrow — because this is the same thing: the AI
+                telling the owner something it worked out from their data. */}
             {aiNote && (
                 <div
                     data-testid={TID.promoAiNote}
-                    className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-600"
+                    className="fade-up relative mt-4 overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white via-white to-orange-50/50 p-4 shadow-[0_2px_12px_rgba(15,23,42,0.04)]"
                 >
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-700">
-                        <Wand2 size={12} /> Built from your last 30 days of sales
+                    <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-orange-100/50 blur-2xl" />
+
+                    <div className="relative flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.25em] text-[#FF6B35]">
+                            <Wand2 size={12} />
+                            Built from your last 30 days
+                        </div>
+                        {/* Daypart is data, so it reads as a value, not a sentence. */}
+                        {aiNote.daypart && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-orange-100 bg-white/70 px-2.5 py-0.5 text-[10px] font-semibold text-[#E85D2A]">
+                                <Clock size={10} />
+                                {aiNote.daypart}
+                            </span>
+                        )}
                     </div>
+
                     {aiNote.rationale && (
-                        <p className="mt-1 leading-relaxed">{aiNote.rationale}</p>
-                    )}
-                    {aiNote.daypart && (
-                        <p className="mt-1 text-slate-400">
-                            Best daypart: {aiNote.daypart}
+                        <p className="relative mt-2 text-[13px] leading-relaxed text-slate-700">
+                            {aiNote.rationale}
                         </p>
                     )}
+
                     {aiNote.dropped.length > 0 && (
-                        <p className="mt-1 text-amber-700">
-                            Skipped {aiNote.dropped.join(", ")} — not on your menu, so it
-                            couldn’t be priced.
-                        </p>
+                        <div className="relative mt-2.5 flex items-start gap-1.5 rounded-lg bg-amber-50/80 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800">
+                            <AlertTriangle size={12} className="mt-px shrink-0" />
+                            <span>
+                                Skipped <b>{aiNote.dropped.join(", ")}</b> — not on your
+                                menu, so it couldn’t be priced.
+                            </span>
+                        </div>
                     )}
-                    <p className="mt-1 text-slate-400">
-                        Everything below is editable — adjust items or the discount
+
+                    <p className="relative mt-2.5 border-t border-orange-100/70 pt-2 text-[11px] text-slate-400">
+                        Everything below is editable — adjust the items or the discount
                         before launching.
                     </p>
                 </div>

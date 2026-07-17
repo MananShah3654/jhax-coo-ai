@@ -439,6 +439,103 @@ _REVIEW_SENTIMENT_UNAVAILABLE = {
             "Order `rating` exists in mock only — wire a reviews source to enable."}
 
 
+_PAYMENT_BUCKETS = ("card", "cash", "other")
+
+
+def _order_payment(o: Dict) -> str | None:
+    """The order's payment bucket, or None when the source recorded none."""
+    m = (o.get("payment_method") or "").strip().lower()
+    return m if m in _PAYMENT_BUCKETS else None
+
+
+def _item_revenue(o: Dict, item_name: str) -> float:
+    """Revenue from `item_name`'s line items inside one order (case-insensitive)."""
+    want = item_name.strip().lower()
+    return round(sum(li.get("price", 0) * li.get("qty", 0) for li in o.get("items", [])
+                     if (li.get("name") or "").strip().lower() == want), 2)
+
+
+def payment_breakdown(days: int = 30, item_name: str | None = None,
+                      start: datetime | None = None, end: datetime | None = None,
+                      label: str | None = None) -> Dict:
+    """Card/cash/other split on a REVENUE basis — dollars AND percent.
+
+    Scope:
+      * item_name=None -> whole-order revenue (order totals).
+      * item_name set  -> only that item's line revenue, attributed to the
+                          payment method of the order it sold in.
+
+    Orders carrying no payment method (no tender — an OPEN Square order, or any
+    source that doesn't record payments) land in `untracked_orders` and are
+    EXCLUDED from the split; they are never silently bucketed as "other". When
+    `tracked_orders` is 0 the split is empty and `note` says so, so the AI has
+    nothing to fabricate a percentage from.
+
+    Percentages are shares of TRACKED revenue only, so revenue_pct sums to 100
+    across the three buckets (or all-zero when nothing is tracked).
+    """
+    if end is None:
+        end = _today() + timedelta(days=1)
+    if start is None:
+        start = end - timedelta(days=days)
+
+    rev = {b: 0.0 for b in _PAYMENT_BUCKETS}
+    cnt = {b: 0 for b in _PAYMENT_BUCKETS}
+    tracked = untracked = 0
+
+    for o in orders_between(start, end):
+        amount = _item_revenue(o, item_name) if item_name else o.get("total", 0)
+        if item_name and amount <= 0:
+            continue                      # this order didn't contain the item
+        bucket = _order_payment(o)
+        if bucket is None:
+            untracked += 1
+            continue
+        tracked += 1
+        rev[bucket] += amount
+        cnt[bucket] += 1
+
+    total = round(sum(rev.values()), 2)
+    return {
+        "window": label or f"last {days} days",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "item": item_name,
+        "basis": "revenue",               # dollars, not order counts
+        "tracked_orders": tracked,
+        "untracked_orders": untracked,
+        "tracked_revenue": total,
+        "by_method": [
+            {
+                "method": b,
+                "revenue": round(rev[b], 2),
+                "revenue_pct": round(rev[b] / total * 100, 1) if total else 0.0,
+                "orders": cnt[b],
+            }
+            for b in _PAYMENT_BUCKETS
+        ],
+        "note": (
+            "no payment method recorded on this source"
+            if tracked == 0 else None
+        ),
+    }
+
+
+def payment_context() -> Dict:
+    """30-day plus day-scoped payment splits for the AI context."""
+    d0 = _today()
+    return {
+        "payments_30d": payment_breakdown(30, label="last 30 days"),
+        "payments_today": payment_breakdown(
+            start=d0, end=d0 + timedelta(days=1), label="today"),
+        "payments_yesterday": payment_breakdown(
+            start=d0 - timedelta(days=1), end=d0, label="yesterday"),
+        "payments_this_week": payment_breakdown(
+            start=d0 - timedelta(days=d0.weekday()), end=d0 + timedelta(days=1),
+            label="this week (Mon-today)"),
+    }
+
+
 def _unavailable_signals() -> List[Dict]:
     """Signals with no data on the ACTIVE source. cart_abandonment drops off this
     list when the source exposes checkout sessions (mock does; live POS doesn't)."""
@@ -710,4 +807,8 @@ def restaurant_context() -> Dict:
         # Baseline-driven (same weekday, last 4 weeks) with ranked causes. Only
         # traffic & repeat-customer are data-backed; the rest say insufficient_data.
         "revenue_diagnosis": revenue_diagnosis(),
+        # Card/cash/other splits on a revenue basis (dollars + %), 30-day plus
+        # today/yesterday/this-week windows so scoped questions don't get a
+        # 30-day number. tracked_orders=0 means the source records no payments.
+        **payment_context(),
     }

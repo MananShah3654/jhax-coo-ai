@@ -332,6 +332,26 @@ class SquareDataSource:
             "cost": _estimate_cost(price, category),
         }
 
+    # Square tender types -> the three buckets analytics reports. Anything that
+    # isn't a plain card or cash tender (gift card, wallet, BNPL, external)
+    # rolls into "other" rather than inventing further categories.
+    _TENDER_BUCKETS = {"CARD": "card", "CASH": "cash"}
+
+    @staticmethod
+    def _payment_method(o: Dict) -> str | None:
+        """card / cash / other from Square's tenders — None when untendered.
+
+        None (not "other") is deliberate: an OPEN/unpaid order has no payment
+        method *yet*, which is different from having been paid by some other
+        means. Analytics counts these as untracked instead of guessing.
+        """
+        tenders = o.get("tenders") or []
+        if not tenders:
+            return None
+        # Square permits split tenders; attribute the order to the largest.
+        top = max(tenders, key=lambda t: (t.get("amount_money") or {}).get("amount", 0))
+        return SquareDataSource._TENDER_BUCKETS.get((top.get("type") or "").upper(), "other")
+
     @staticmethod
     def _map_order(o: Dict, var_to_item: Dict[str, str] | None = None) -> Dict:
         var_to_item = var_to_item or {}
@@ -370,6 +390,7 @@ class SquareDataSource:
             "tax": tax,
             "tip": tip,
             "total": total,
+            "payment_method": SquareDataSource._payment_method(o),
             "wait_minutes": 0,
             "rating": 0,
         }

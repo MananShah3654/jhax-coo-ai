@@ -37,6 +37,11 @@ export const TID = {
     unlockForgot: "unlock-forgot",
 
     // Layout
+    campCopyWhatsapp: "camp-copy-whatsapp",
+    campCopyCaption: "camp-copy-caption",
+    campDownloadInstagram: "camp-download-instagram",
+    campBannerReady: "camp-banner-ready",
+
     navHome: "nav-home",
     navKpis: "nav-kpis",
     navChat: "nav-chat",

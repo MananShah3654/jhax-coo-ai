@@ -2,9 +2,48 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import Layout from "@/components/Layout";
-import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download, UtensilsCrossed, Tag, TrendingUp } from "lucide-react";
+import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download, UtensilsCrossed, Tag, TrendingUp, Copy, CheckCircle2, Instagram, MessageCircle } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
+
+/**
+ * Strip the markdown the LLM sometimes emits. WhatsApp and Instagram render
+ * none of it — "**Free dessert**" would paste literally, asterisks and all.
+ */
+function stripMarkdown(text = "") {
+    return String(text)
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")  // [label](url) / ![alt](src) -> label
+        .replace(/(\*\*\*|___)(.*?)\1/g, "$2")      // ***bold italic***
+        .replace(/(\*\*|__)(.*?)\1/g, "$2")         // **bold**
+        .replace(/(\*|_)(.*?)\1/g, "$2")            // *italic*
+        .replace(/`{1,3}([^`]*)`{1,3}/g, "$1")      // `code`
+        .replace(/^\s{0,3}#{1,6}\s+/gm, "")         // # headings
+        .replace(/^\s{0,3}>\s?/gm, "")              // > quotes
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+/** Full campaign message for WhatsApp: subject, body, then the CTA. */
+function whatsappText(draft) {
+    if (!draft) return "";
+    return stripMarkdown(
+        [draft.subject, draft.body, draft.cta && `👉 ${draft.cta}`]
+            .filter(Boolean)
+            .join("\n\n"),
+    );
+}
+
+/**
+ * Instagram caption — deliberately NOT the WhatsApp copy. Subject + CTA only:
+ * a caption sits under an image that already carries the message, so the full
+ * body would bury the call to action.
+ */
+function instagramCaption(draft) {
+    if (!draft) return "";
+    return stripMarkdown(
+        [draft.subject, draft.cta && `👉 ${draft.cta}`].filter(Boolean).join("\n\n"),
+    );
+}
 
 const AUDIENCES = [
     { id: "vip", label: "VIP customers" },
@@ -39,10 +78,12 @@ export default function Marketing() {
     const [banner, setBanner] = useState(null); // {url, prompt, seed}
     const [bannerBusy, setBannerBusy] = useState(false);
     const [imgLoading, setImgLoading] = useState(false);
+    const [downloading, setDownloading] = useState(false);
 
     // AI Combo builder (data-grounded offer from best-sellers + sales trends)
     const [combo, setCombo] = useState(null);
-    const [comboBusy, setComboBusy] = useState(false);
+    const [comboBusy, setComboBusy] = useState(false)
+    ;
 
     // Pick up prefill from /home → Launch Campaign or from an AI action button
     useEffect(() => {
@@ -94,6 +135,55 @@ export default function Marketing() {
             toast.success("Campaign scheduled for delivery");
         } catch {
             toast.error("Launch failed");
+        }
+    };
+
+    // Clipboard needs a secure context (https / localhost); fall back to the
+    // legacy path rather than silently doing nothing on plain http.
+    const copyText = async (text, label) => {
+        if (!text) return;
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                if (!ok) throw new Error("execCommand copy rejected");
+            }
+            toast.success(`${label} copied`);
+        } catch {
+            toast.error(`Couldn't copy ${label.toLowerCase()} — copy it manually`);
+        }
+    };
+
+    // Fetch to a blob first: the banner is cross-origin, and <a download> is
+    // ignored for cross-origin URLs (the browser just opens a tab instead).
+    const downloadBanner = async () => {
+        if (!banner?.url) return;
+        setDownloading(true);
+        try {
+            const res = await fetch(banner.url, { mode: "cors" });
+            if (!res.ok) throw new Error(`image host returned ${res.status}`);
+            const blob = await res.blob();
+            const href = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = href;
+            a.download = `jhapay-banner-${banner.seed || Date.now()}.jpg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(href);
+            toast.success("Banner downloaded");
+        } catch {
+            toast.error("Download failed — use “Open full size” and save it manually");
+        } finally {
+            setDownloading(false);
         }
     };
 
@@ -303,6 +393,37 @@ export default function Marketing() {
                             >
                                 <Send size={14} /> Launch Campaign
                             </button>
+
+                            {/* Text actions live with the text they copy; the
+                                image action lives with the banner below. */}
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                    Take it to your channels
+                                </div>
+                                <div className="mt-3 flex flex-wrap gap-3">
+                                    <button
+                                        data-testid={TID.campCopyWhatsapp}
+                                        onClick={() =>
+                                            copyText(whatsappText(draft), "WhatsApp copy")
+                                        }
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#25D366] hover:text-[#128C7E]"
+                                    >
+                                        <MessageCircle size={13} /> Copy for WhatsApp
+                                    </button>
+                                    <button
+                                        data-testid={TID.campCopyCaption}
+                                        onClick={() =>
+                                            copyText(instagramCaption(draft), "Caption")
+                                        }
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
+                                    >
+                                        <Copy size={13} /> Copy caption
+                                    </button>
+                                </div>
+                                <p className="mt-3 text-xs text-slate-500">
+                                    Come back in 48 hours — we’ll show you if revenue moved.
+                                </p>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -380,23 +501,44 @@ export default function Marketing() {
                             />
                         )}
                         {banner && !imgLoading && (
-                            <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white px-4 py-3">
-                                <button
-                                    data-testid={TID.campBannerRegenerate}
-                                    onClick={() => generateBanner(true)}
-                                    disabled={bannerBusy}
-                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A] disabled:opacity-50"
+                            <div className="border-t border-slate-200 bg-white px-4 py-3">
+                                <div
+                                    data-testid={TID.campBannerReady}
+                                    className="flex items-center gap-2 text-sm font-semibold text-emerald-600"
                                 >
-                                    <RefreshCw size={13} /> Regenerate
-                                </button>
-                                <a
-                                    href={banner.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
-                                >
-                                    <Download size={13} /> Open full size
-                                </a>
+                                    <CheckCircle2 size={15} /> Banner ready
+                                </div>
+                                <div className="mt-3 flex flex-wrap items-center gap-3">
+                                    <button
+                                        data-testid={TID.campDownloadInstagram}
+                                        onClick={downloadBanner}
+                                        disabled={!banner?.url || downloading}
+                                        className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                                    >
+                                        {downloading ? (
+                                            <Loader2 size={13} className="animate-spin" />
+                                        ) : (
+                                            <Instagram size={13} />
+                                        )}
+                                        {downloading ? "Downloading…" : "Download for Instagram"}
+                                    </button>
+                                    <button
+                                        data-testid={TID.campBannerRegenerate}
+                                        onClick={() => generateBanner(true)}
+                                        disabled={bannerBusy}
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A] disabled:opacity-50"
+                                    >
+                                        <RefreshCw size={13} /> Regenerate
+                                    </button>
+                                    <a
+                                        href={banner.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#FF6B35] hover:text-[#E85D2A]"
+                                    >
+                                        <Download size={13} /> Open full size
+                                    </a>
+                                </div>
                             </div>
                         )}
                     </div>

@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -296,6 +297,58 @@ class SquareDataSource:
             logger.warning("Square fallback %s %s: %s", method, path, exc)
             return None
 
+    def push_discount(self, *, name: str, percentage: float,
+                      idempotency_key: str) -> Dict:
+        """Create a DISCOUNT catalog object in Square. Returns the RAW result.
+
+        Deliberately NOT routed through _request(): that logs and returns None
+        so a failed read can fall back to mock. For a write that would be
+        dangerous — None is indistinguishable from success at the call site, and
+        the UI would report a promotion pushed to a POS that never received it.
+        Here every outcome is reported as Square actually returned it.
+
+        Returns {ok, status, response, error} where `response` is Square's
+        verbatim JSON body (including its `errors` array on failure).
+        """
+        if not self.token:
+            return {"ok": False, "status": None, "response": None,
+                    "error": "SQUARE_ACCESS_TOKEN is not configured"}
+        # Square wants percentage as a string, max 5 dp, no % sign.
+        body = {
+            "idempotency_key": idempotency_key,
+            "object": {
+                "type": "DISCOUNT",
+                # "#name" is Square's temporary client-side id for a new object;
+                # it returns the permanent id in the response.
+                "id": "#" + re.sub(r"[^A-Za-z0-9_-]", "-", name)[:40] or "#promo",
+                "discount_data": {
+                    "name": name[:255],
+                    "discount_type": "FIXED_PERCENTAGE",
+                    "percentage": f"{float(percentage):.2f}",
+                },
+            },
+        }
+        try:
+            with httpx.Client(timeout=20.0, headers=self._headers()) as c:
+                r = c.post(f"{self.base}/v2/catalog/object", json=body)
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {"raw_text": r.text[:800]}
+            if r.status_code >= 400:
+                errs = payload.get("errors") if isinstance(payload, dict) else None
+                detail = "; ".join(
+                    f"{e.get('code')}: {e.get('detail')}" for e in (errs or [])
+                ) or f"Square returned HTTP {r.status_code}"
+                return {"ok": False, "status": r.status_code,
+                        "response": payload, "error": detail}
+            return {"ok": True, "status": r.status_code,
+                    "response": payload, "error": None}
+        except Exception as exc:
+            # Network/timeout: report it, never dress it up as success.
+            return {"ok": False, "status": None, "response": None,
+                    "error": f"{type(exc).__name__}: {exc}"}
+
     # --- mappers (Square shape -> internal shape) ---
     @staticmethod
     def _map_location(loc: Dict) -> Dict:
@@ -308,8 +361,9 @@ class SquareDataSource:
             "name": name,
             "city": addr.get("locality") or "",
             "manager": "",
-            # Static dining capacity (Square can't report it) so Table Turnover
-            # and RevPASH compute on live Square. See _square_capacity.
+            # Square reports no dining capacity. Zeros unless the operator
+            # declared it, which makes Table Turnover / RevPASH degrade to "—"
+            # rather than compute off an assumed denominator. See _square_capacity.
             "seats": cap["seats"],
             "tables": cap["tables"],
         }

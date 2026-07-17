@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle } from "lucide-react";
 import Layout from "@/components/Layout";
 import { api, fmtUsd } from "@/lib/api";
 import { toast } from "sonner";
@@ -50,6 +50,8 @@ export default function Promotions() {
     const [discount, setDiscount] = useState(15);
     const [audience, setAudience] = useState("Lunch crowd");
     const [busy, setBusy] = useState(false);
+    const [pushBusy, setPushBusy] = useState(false);
+    const [pushResult, setPushResult] = useState(null);
 
     // Load menu items for picker
     useEffect(() => {
@@ -113,6 +115,37 @@ export default function Promotions() {
             toast.error("Launch failed");
         } finally {
             setBusy(false);
+        }
+    };
+
+    // Push the combo's discount to the live Square catalog. Every outcome here
+    // is Square's own — on failure we surface its error text verbatim rather
+    // than a generic "failed", and never claim success it didn't report.
+    const pushToSquare = async () => {
+        setPushBusy(true);
+        setPushResult(null);
+        try {
+            const { data } = await api.post("/promotions/square-push", {
+                name,
+                discount,
+                items,
+            });
+            setPushResult(data);
+            if (data.ok) {
+                toast.success(`Live in Square · ${data.catalog_object_id}`);
+            } else {
+                toast.error(data.error || "Square rejected the promotion");
+            }
+        } catch (e) {
+            const detail =
+                e?.response?.data?.detail ||
+                e?.response?.data?.error ||
+                e?.message ||
+                "Request failed";
+            setPushResult({ ok: false, error: detail, square_response: null });
+            toast.error(detail);
+        } finally {
+            setPushBusy(false);
         }
     };
 
@@ -301,6 +334,55 @@ export default function Promotions() {
                         )}
                         Launch Promotion
                     </button>
+
+                    <button
+                        data-testid="promo-push-square"
+                        onClick={pushToSquare}
+                        disabled={pushBusy || items.length === 0}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition-all hover:border-slate-900 hover:text-slate-900 disabled:opacity-50"
+                    >
+                        {pushBusy ? (
+                            <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                            <Store size={14} />
+                        )}
+                        {pushBusy ? "Pushing to Square…" : "Push to Square POS"}
+                    </button>
+                    <p className="mt-2 text-center text-[11px] text-slate-400">
+                        Creates a real discount in your Square catalog.
+                    </p>
+
+                    {/* Square's actual answer — success or failure, verbatim. */}
+                    {pushResult && (
+                        <div
+                            data-testid="promo-push-result"
+                            className={`mt-3 rounded-2xl border p-3 text-xs ${
+                                pushResult.ok
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                    : "border-red-200 bg-red-50 text-red-700"
+                            }`}
+                        >
+                            <div className="flex items-center gap-1.5 font-semibold">
+                                {pushResult.ok ? (
+                                    <>
+                                        <CheckCircle2 size={13} /> Live in Square
+                                    </>
+                                ) : (
+                                    <>
+                                        <XCircle size={13} /> Square rejected it
+                                    </>
+                                )}
+                            </div>
+                            {pushResult.ok ? (
+                                <div className="mt-1 space-y-0.5 font-mono text-[10px]">
+                                    <div>id: {pushResult.catalog_object_id}</div>
+                                    <div>version: {String(pushResult.version)}</div>
+                                </div>
+                            ) : (
+                                <div className="mt-1 break-words">{pushResult.error}</div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </Layout>

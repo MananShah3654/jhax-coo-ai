@@ -30,7 +30,8 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
+import hashlib
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -94,6 +95,12 @@ class CampaignImageRequest(BaseModel):
     description: str
     style: str | None = "photorealistic"
     seed: int | None = None
+
+
+class SquarePromoRequest(BaseModel):
+    name: str
+    discount: float                 # percent off, 0 < d < 100
+    items: list[str] | None = None  # recorded for context; Square gets the discount
 
 
 class ComboRequest(BaseModel):
@@ -395,6 +402,47 @@ async def combos_generate(req: ComboRequest):
     except Exception as e:
         logger.exception("Combo generation error")
         raise HTTPException(500, f"Combo generation failed: {e}")
+
+
+@api.post("/promotions/square-push")
+async def promotions_square_push(req: SquarePromoRequest):
+    """Create the promotion as a real DISCOUNT catalog object in Square.
+
+    Reports exactly what Square returned. Unlike the mocked /actions/execute
+    below, this touches a live POS catalog, so a failure must surface as a
+    failure — the UI shows Square's own error text rather than a success toast.
+    """
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Promotion needs a name.")
+    if not (0 < req.discount < 100):
+        raise HTTPException(400, "Discount must be between 0 and 100 percent.")
+    pusher = getattr(DS, "push_discount", None)
+    if not callable(pusher):
+        # Only SquareDataSource can push. Say so rather than pretend.
+        raise HTTPException(
+            400,
+            f"Active data source is '{DS.name}', which has no Square catalog. "
+            "Set DATA_SOURCE=square to push promotions to the POS.",
+        )
+    # Same name + same discount => same key => Square returns the existing
+    # object instead of creating a duplicate on a double-click.
+    key = hashlib.sha256(
+        f"{name}|{req.discount}|{date.today().isoformat()}".encode("utf-8")
+    ).hexdigest()[:40]
+    result = pusher(name=name, percentage=req.discount, idempotency_key=key)
+    obj = ((result.get("response") or {}).get("catalog_object") or {}) if result.get("ok") else {}
+    return {
+        "ok": result["ok"],
+        "error": result["error"],
+        "square_status": result["status"],
+        "catalog_object_id": obj.get("id"),
+        "version": obj.get("version"),
+        # Square's verbatim body, so the UI/logs can show the real response.
+        "square_response": result["response"],
+        "pushed_at": datetime.now(timezone.utc).isoformat(),
+        "items": req.items or [],
+    }
 
 
 @api.post("/actions/execute")

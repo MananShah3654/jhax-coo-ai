@@ -17,6 +17,7 @@ Endpoints (all under /api):
   POST /ai/tts                    - text -> audio (OpenAI TTS)
   POST /campaigns/generate        - AI-drafted campaign
   POST /campaigns/image           - AI promotional banner (free text-to-image)
+  POST /combos/generate           - AI product combo (data-grounded, sales-optimized)
   POST /actions/execute           - execute one-click actions (mocked: SMS/Email/...)
   GET  /reports/{type}            - generate text report (markdown)
 """
@@ -50,7 +51,7 @@ from analytics import (  # noqa: E402
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
-    build_campaign_image, parse_coo_json,
+    build_campaign_image, generate_combo, parse_coo_json,
 )
 from pdf_report import build_report_pdf  # noqa: E402
 from database import (  # noqa: E402
@@ -93,6 +94,12 @@ class CampaignImageRequest(BaseModel):
     description: str
     style: str | None = "photorealistic"
     seed: int | None = None
+
+
+class ComboRequest(BaseModel):
+    # Optional hint (e.g. the current campaign goal). Combos are generated from
+    # live sales trends + best-sellers even when this is empty.
+    focus: str | None = None
 
 
 class TTSRequest(BaseModel):
@@ -216,6 +223,10 @@ async def dashboard():
     return {
         "owner": {"name": OWNER_NAME, "restaurant": DS.owner()["restaurant"]},
         "today": today_kpis(),
+        # Repeat Customer Rate is a cohort snapshot (not a daily window), so it
+        # comes from customer_intelligence rather than today_kpis — surfaced here
+        # so the dashboard can show all headline KPIs from one call.
+        "repeat_rate_pct": customer_intelligence()["repeat_rate_pct"],
         "health": health_score(),
         "briefing": daily_briefing(),
         "branches_top3": branch_performance(7)[:3],
@@ -372,6 +383,16 @@ async def campaigns_image(req: CampaignImageRequest):
     except Exception as e:
         logger.exception("Banner generation error")
         raise HTTPException(500, f"Banner generation failed: {e}")
+
+
+@api.post("/combos/generate")
+async def combos_generate(req: ComboRequest):
+    """AI product combo optimized from current sales trends + best-sellers."""
+    try:
+        return await generate_combo(req.focus)
+    except Exception as e:
+        logger.exception("Combo generation error")
+        raise HTTPException(500, f"Combo generation failed: {e}")
 
 
 @api.post("/actions/execute")

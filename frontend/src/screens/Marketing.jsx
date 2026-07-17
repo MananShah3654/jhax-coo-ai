@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import Layout from "@/components/Layout";
-import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download } from "lucide-react";
+import { Sparkles, Loader2, Send, Image as ImageIcon, RefreshCw, Download, UtensilsCrossed, Tag, TrendingUp } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
@@ -39,6 +39,10 @@ export default function Marketing() {
     const [banner, setBanner] = useState(null); // {url, prompt, seed}
     const [bannerBusy, setBannerBusy] = useState(false);
     const [imgLoading, setImgLoading] = useState(false);
+
+    // AI Combo builder (data-grounded offer from best-sellers + sales trends)
+    const [combo, setCombo] = useState(null);
+    const [comboBusy, setComboBusy] = useState(false);
 
     // Pick up prefill from /home → Launch Campaign or from an AI action button
     useEffect(() => {
@@ -112,6 +116,35 @@ export default function Marketing() {
             toast.error("Banner generation failed");
         } finally {
             setBannerBusy(false);
+        }
+    };
+
+    const generateCombo = async () => {
+        setComboBusy(true);
+        try {
+            // `focus` is an optional hint — the combo is built from live sales
+            // trends + best-sellers even if the goal is blank.
+            const { data } = await api.post("/combos/generate", { focus: goal });
+            setCombo(data);
+        } catch {
+            toast.error("Combo generation failed");
+        } finally {
+            setComboBusy(false);
+        }
+    };
+
+    const launchCombo = async () => {
+        if (!combo) return;
+        try {
+            await api.post("/actions/execute", {
+                id: "combo_launch",
+                kind: "promotion",
+                label: combo.name,
+                payload: { combo },
+            });
+            toast.success(`"${combo.name}" scheduled as a promotion`);
+        } catch {
+            toast.error("Launch failed");
         }
     };
 
@@ -364,6 +397,232 @@ export default function Marketing() {
                                 >
                                     <Download size={13} /> Open full size
                                 </a>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+            {/* AI Combo builder (data-grounded offer) */}
+            <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-6">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-[#FF6B35]">
+                    <UtensilsCrossed size={13} /> AI Combo Builder
+                </div>
+                <h2 className="mt-1 font-display text-xl font-semibold text-slate-900">
+                    Turn your best-sellers into a combo that sells
+                </h2>
+                <p className="mt-1 max-w-xl text-sm text-slate-500">
+                    The AI reads your live sales trends and top-selling items, then
+                    bundles complementary products into an offer priced to lift
+                    average order value.
+                </p>
+
+                <div className="mt-6 grid items-stretch gap-6 lg:grid-cols-2">
+                    {/* LEFT — controls */}
+                    <div className="flex flex-col rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                        <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                            Optimize toward (optional)
+                        </label>
+                        <input
+                            value={goal}
+                            onChange={(e) => setGoal(e.target.value)}
+                            list="goals-list"
+                            className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm focus:border-[#FF6B35] focus:outline-none focus:ring-4 focus:ring-orange-100"
+                        />
+                        <p className="mt-2 text-xs text-slate-400">
+                            Leave as-is to let the AI pick from what's selling best right now.
+                        </p>
+                        <button
+                            data-testid={TID.comboGenerate}
+                            onClick={generateCombo}
+                            disabled={comboBusy}
+                            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#FF6B35] px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(255,107,53,0.4)] transition-all hover:bg-[#E85D2A] disabled:opacity-50"
+                        >
+                            {comboBusy ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <Sparkles size={14} />
+                            )}
+                            {comboBusy ? "Building combo…" : "Generate Combo"}
+                        </button>
+
+                        {/* How it works — makes the panel feel like a tool */}
+                        <div className="mt-6 space-y-3 border-t border-slate-200 pt-5">
+                            {[
+                                { Icon: TrendingUp, t: "Reads live sales trends", s: "Today vs. last week, by product" },
+                                { Icon: UtensilsCrossed, t: "Bundles complementary best-sellers", s: "Across courses for a fuller basket" },
+                                { Icon: Tag, t: "Prices to lift order value", s: "A charm-priced, save-more offer" },
+                            ].map(({ Icon, t, s }) => (
+                                <div key={t} className="flex items-start gap-3">
+                                    <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white text-[#FF6B35] ring-1 ring-orange-100">
+                                        <Icon size={14} />
+                                    </span>
+                                    <div>
+                                        <div className="text-sm font-medium text-slate-800">{t}</div>
+                                        <div className="text-xs text-slate-400">{s}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* RIGHT — combo preview */}
+                    <div
+                        data-testid={TID.comboResult}
+                        className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                    >
+                        {/* Preview header bar */}
+                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+                            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">
+                                Combo Preview
+                            </span>
+                            {combo && !comboBusy && combo.savings_pct > 0 && (
+                                <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 ring-1 ring-emerald-100">
+                                    Save {combo.savings_pct}%
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Empty / loading skeleton — structured ghost of a real combo */}
+                        {(!combo || comboBusy) && (
+                            <div className="flex flex-1 flex-col p-5">
+                                <div className={comboBusy ? "animate-pulse" : ""}>
+                                    <div className="h-6 w-40 rounded-lg bg-slate-100" />
+                                    <div className="mt-2 h-3 w-52 rounded bg-slate-100" />
+                                    <div className="mt-4 space-y-2.5">
+                                        {[0, 1, 2].map((i) => (
+                                            <div
+                                                key={i}
+                                                className="flex items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-3 py-2.5"
+                                            >
+                                                <span className="h-9 w-9 shrink-0 rounded-lg bg-slate-200/70" />
+                                                <div className="flex-1 space-y-1.5">
+                                                    <div className="h-2.5 w-2/3 rounded bg-slate-200/70" />
+                                                    <div className="h-2 w-1/3 rounded bg-slate-200/60" />
+                                                </div>
+                                                <div className="h-3 w-10 rounded bg-slate-200/70" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 h-16 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70" />
+                                </div>
+                                <div className="mt-auto pt-5 text-center text-xs text-slate-400">
+                                    {comboBusy ? (
+                                        <span className="inline-flex items-center gap-2 text-slate-500">
+                                            <Loader2 size={13} className="animate-spin text-[#FF6B35]" />
+                                            Analyzing best-sellers…
+                                        </span>
+                                    ) : (
+                                        "Generate a combo to see products, pricing and impact here."
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Result */}
+                        {combo && !comboBusy && (
+                            <div className="flex flex-1 flex-col p-5">
+                                {/* Title block */}
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-display text-2xl font-semibold tracking-tight text-slate-900">
+                                            {combo.name}
+                                        </h3>
+                                        {combo.tagline && (
+                                            <p className="mt-0.5 text-sm text-slate-500">
+                                                {combo.tagline}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <span className="shrink-0 rounded-full bg-orange-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#E85D2A]">
+                                        {combo.target_daypart}
+                                    </span>
+                                </div>
+
+                                {/* Product cards */}
+                                <div className="mt-4 space-y-2.5">
+                                    {combo.items?.map((it, i) => (
+                                        <div
+                                            key={i}
+                                            className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-orange-200"
+                                        >
+                                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[#FF6B35] to-[#E85D2A] text-white shadow-[0_3px_8px_rgba(255,107,53,0.3)]">
+                                                <UtensilsCrossed size={15} />
+                                            </span>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="truncate text-sm font-semibold text-slate-800">
+                                                    {it.name}
+                                                </div>
+                                                {it.category && (
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                                                        {it.category}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <span className="font-display text-sm font-semibold tabular-nums text-slate-700">
+                                                ${it.price?.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Pricing summary bar */}
+                                <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-orange-100 bg-gradient-to-b from-orange-50/70 to-white px-4 py-3.5">
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                            Combo price
+                                        </div>
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="font-display text-[28px] font-semibold leading-none tabular-nums text-slate-900">
+                                                ${combo.combo_price?.toFixed(2)}
+                                            </span>
+                                            <span className="text-sm text-slate-400 line-through tabular-nums">
+                                                ${combo.regular_total?.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_3px_10px_rgba(16,185,129,0.3)]">
+                                        <Tag size={12} /> Save ${combo.savings?.toFixed(2)}
+                                    </span>
+                                </div>
+
+                                {/* Rationale */}
+                                {combo.rationale && (
+                                    <p className="mt-4 border-l-2 border-orange-200 pl-3 text-[13.5px] leading-relaxed text-slate-600">
+                                        {combo.rationale}
+                                    </p>
+                                )}
+
+                                {/* Impact chips */}
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600">
+                                        <TrendingUp size={13} className="text-emerald-600" />
+                                        ~{combo.expected_uplift_pct}% AOV uplift
+                                    </span>
+                                    {combo.expected_daily_revenue > 0 && (
+                                        <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                                            +${combo.expected_daily_revenue?.toLocaleString()}/day est.
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="mt-5 flex flex-wrap items-center gap-2.5 border-t border-slate-100 pt-5">
+                                    <button
+                                        data-testid={TID.comboLaunch}
+                                        onClick={launchCombo}
+                                        className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+                                    >
+                                        <Send size={14} /> Launch Combo
+                                    </button>
+                                    <button
+                                        data-testid={TID.comboRegenerate}
+                                        onClick={generateCombo}
+                                        disabled={comboBusy}
+                                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-[#FF6B35] hover:text-[#E85D2A] disabled:opacity-50"
+                                    >
+                                        <RefreshCw size={13} /> Regenerate
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

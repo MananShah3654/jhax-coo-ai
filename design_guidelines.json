@@ -15,7 +15,8 @@
   },
   "typography": {
     "fonts": {
-      "heading": "Outfit",
+      "heading": "Fraunces",
+      "heading_note": "Editorial high-contrast serif (opsz axis) for headlines + large KPI numbers — warm, upscale-bistro. Outfit remains available via .font-grotesk.",
       "body": "Manrope",
       "mono": "JetBrains Mono"
     },
@@ -100,7 +101,7 @@
     "Implement the PIN login matching the classic POS system but with modern minimal glassmorphism on the #F8FAFC background.",
     "The Hero of the AI COO Home is the Voice interface. The microphone button must be massive, central, and feature glowing orange drop shadows.",
     "AI Chat must not look like ChatGPT. Use the structured 'Decision Card' layout within the chat (Status > Reason > Opportunity > Action buttons) per the ai_chat guidelines. AI Bubbles should look like native app cards.",
-    "Use Outfit for Headings and Manrope for body text. Enforce tracking-tight on all headers.",
+    "Use Fraunces (editorial serif) for headings and large KPI numbers, Manrope for body text. Enforce tracking-tight on all headers. Outfit is available as .font-grotesk where a sans headline is needed.",
     "Restaurant Health Score must be implemented as a circular SVG progress ring, similar to Apple Watch rings.",
     "Do NOT use 'Inter' or 'Roboto' fonts anywhere.",
     "Include 'data-testid' on all interactive elements (buttons, inputs, links, cards, chat inputs).",

@@ -348,41 +348,131 @@ def forecast(days_ahead: int = 30) -> Dict:
     }
 
 
+# A concrete lever per component, surfaced by "3 steps to improve your score".
+# Phrased as an instruction the owner can act on today — never a fabricated
+# projection of what it's worth.
+_HEALTH_ACTIONS = {
+    "revenue_growth":
+        "Run a promo in your slowest daypart — see Promotions for a combo.",
+    "repeat_customers":
+        "Message at-risk regulars from Marketing AI before they lapse.",
+    "reviews":
+        "Ask happy guests for a review at checkout.",
+    "wait_times":
+        "Add prep capacity in your peak hour — check Operations for the spike.",
+    "tips":
+        "Enable tip prompts on the POS checkout screen.",
+    "staff_efficiency":
+        "Re-stagger shifts so cover peaks match your busiest hours.",
+}
+
+# Why a component can't be scored on the active source. Shown instead of a
+# number so a structural constant never reads as a measurement.
+_HEALTH_UNMEASURABLE = {
+    "reviews": "No review/rating source connected — Square returns no ratings.",
+    "wait_times": "This source records no order wait times.",
+    "tips": "This source records no tips.",
+    "staff_efficiency": "Needs order wait times, which this source doesn't record.",
+}
+
+
+def _ratings_supported() -> bool:
+    """True when any order carries a real rating (mock does; Square doesn't)."""
+    return any(o.get("rating") for o in _orders())
+
+
+def _waits_supported() -> bool:
+    """True when any order carries a real wait time (mock does; Square doesn't)."""
+    return any(o.get("wait_minutes") for o in _orders())
+
+
+def _tips_supported() -> bool:
+    """True when any order carries a tip (Square sandbox records none)."""
+    return any(o.get("tip") for o in _orders())
+
+
 def health_score() -> Dict:
-    """0–100 score with component breakdown — feeds the Apple-watch ring."""
-    # Revenue growth (7d vs prior 7d)
+    """0–100 score with component breakdown — feeds the Apple-watch ring.
+
+    Only components the ACTIVE source can actually measure are scored; the rest
+    are None and excluded from the average. This matters: Square exposes no
+    ratings, wait times or tips, and _map_order hardcodes rating=0 and
+    wait_minutes=0. Scored naively that produced reviews=0, tips=0,
+    wait_times=100 and staff_efficiency=100 — four structural constants, not
+    measurements — and the headline score was their average with the two real
+    signals, landing at a meaningless 51 ("red") because the fakes cancelled out.
+
+    `components` keeps every key (None where unmeasurable) so the UI can show
+    "—"; `unavailable` explains each one; `measured` lists what the score is
+    actually built from.
+    """
     end = _today() + timedelta(days=1)
+
+    # --- Revenue growth: 7d vs prior 7d. Always measurable from orders. ---
     cur = kpi_window(end - timedelta(days=7), end)
     prev = kpi_window(end - timedelta(days=14), end - timedelta(days=7))
     growth = 0.0 if not prev["revenue"] else (cur["revenue"] - prev["revenue"]) / prev["revenue"] * 100
 
-    ci = customer_intelligence()
-    repeat = ci["repeat_rate_pct"]
+    # --- Repeat customers: real cohort data. ---
+    repeat = customer_intelligence()["repeat_rate_pct"]
 
-    # Avg rating last 30d
-    end30 = _today() + timedelta(days=1)
-    last30 = orders_between(end30 - timedelta(days=30), end30)
-    avg_rating = sum(o["rating"] for o in last30) / max(len(last30), 1)
-    avg_wait = sum(o["wait_minutes"] for o in last30) / max(len(last30), 1)
+    last30 = orders_between(end - timedelta(days=30), end)
+    n = max(len(last30), 1)
+    avg_rating = sum(o["rating"] for o in last30) / n
+    avg_wait = sum(o["wait_minutes"] for o in last30) / n
+    subtotal30 = sum(o["subtotal"] for o in last30)
+    tip_pct = (sum(o["tip"] for o in last30) / subtotal30 * 100) if subtotal30 else 0.0
 
-    # Tip percentage (proxy for staff service quality)
-    tip_pct = (sum(o["tip"] for o in last30) / sum(o["subtotal"] for o in last30) * 100) if last30 else 0.0
+    def clamp(v: float) -> float:
+        return max(0.0, min(100.0, v))
 
-    components = {
-        "revenue_growth": max(0, min(100, 50 + growth * 4)),     # +12% -> 98
-        "repeat_customers": max(0, min(100, repeat * 1.5)),
-        "reviews": max(0, min(100, (avg_rating - 3) * 50 + 50)),  # 4.5 -> 75
-        "wait_times": max(0, min(100, 100 - max(0, avg_wait - 8) * 6)),
-        "tips": max(0, min(100, tip_pct * 5)),                   # 18% -> 90
-        "staff_efficiency": max(0, min(100, 100 - max(0, avg_wait - 10) * 5)),
+    components: Dict[str, float | None] = {
+        "revenue_growth": clamp(50 + growth * 4),          # +12% -> 98
+        # NOTE: saturates at a 66.7% repeat rate (x1.5 -> 100). A genuinely
+        # excellent rate, but the ceiling hides headroom above it.
+        "repeat_customers": clamp(repeat * 1.5),
+        "reviews": clamp((avg_rating - 3) * 50 + 50) if _ratings_supported() else None,
+        "wait_times": clamp(100 - max(0.0, avg_wait - 8) * 6) if _waits_supported() else None,
+        "tips": clamp(tip_pct * 5) if _tips_supported() else None,
+        "staff_efficiency": (
+            clamp(100 - max(0.0, avg_wait - 10) * 5) if _waits_supported() else None
+        ),
     }
-    score = round(sum(components.values()) / len(components))
-    state = "green" if score >= 75 else "yellow" if score >= 55 else "red"
+
+    measured = {k: v for k, v in components.items() if v is not None}
+    score = round(sum(measured.values()) / len(measured)) if measured else None
+    state = (
+        None if score is None
+        else "green" if score >= 75 else "yellow" if score >= 55 else "red"
+    )
     return {
         "score": score,
         "state": state,
-        "components": {k: round(v) for k, v in components.items()},
+        "components": {k: (round(v) if v is not None else None)
+                       for k, v in components.items()},
+        # Only what the score is actually built from.
+        "measured": sorted(measured),
+        "unavailable": {k: _HEALTH_UNMEASURABLE[k]
+                        for k in components if components[k] is None},
+        "steps": health_steps(components),
     }
+
+
+def health_steps(components: Dict[str, float | None], limit: int = 3) -> List[Dict]:
+    """The lowest MEASURED components that still have headroom, worst first.
+
+    Unmeasurable components are skipped entirely — "improve your reviews" is
+    not an actionable step when no review data exists to move. Components
+    already at 100 are skipped too: there is nothing left to improve. So this
+    can return fewer than `limit` steps, or none at all, and that is a truthful
+    answer rather than padding the list.
+    """
+    real = [(k, v) for k, v in components.items() if v is not None and v < 100]
+    real.sort(key=lambda kv: kv[1])
+    return [
+        {"metric": k, "score": round(v), "action": _HEALTH_ACTIONS[k]}
+        for k, v in real[:limit]
+    ]
 
 
 def daily_briefing() -> Dict:

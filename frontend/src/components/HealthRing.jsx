@@ -7,11 +7,18 @@ export default function HealthRing({
     size = 168,
     stroke = 14,
 }) {
+    // score === null means nothing on the active source could be scored. Show a
+    // grey "—" ring: null would otherwise coerce to 0 and paint a full red ring,
+    // which reads as "your health is terrible" instead of "we can't tell".
+    const isNil = score === null || score === undefined;
     const radius = (size - stroke) / 2;
     const circ = 2 * Math.PI * radius;
-    const offset = circ - (Math.max(0, Math.min(100, score)) / 100) * circ;
-    const color =
-        state === "green"
+    const offset = isNil
+        ? circ
+        : circ - (Math.max(0, Math.min(100, score)) / 100) * circ;
+    const color = isNil
+        ? "#CBD5E1"
+        : state === "green"
             ? "#22C55E"
             : state === "yellow"
               ? "#F59E0B"
@@ -53,8 +60,12 @@ export default function HealthRing({
                 />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <div className="font-mono text-5xl font-bold text-slate-900">
-                    {score}
+                <div
+                    className={`font-mono text-5xl font-bold ${
+                        isNil ? "text-slate-300" : "text-slate-900"
+                    }`}
+                >
+                    {isNil ? "—" : score}
                 </div>
                 <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">
                     Health Score

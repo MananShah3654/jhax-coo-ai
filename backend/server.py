@@ -47,8 +47,8 @@ from mock_data import DATASET  # noqa: E402  (kept for backwards compat)
 from data_source import get_source  # noqa: E402
 from analytics import (  # noqa: E402
     today_kpis, daily_briefing, branch_performance, menu_performance,
-    customer_intelligence, revenue_breakdown, forecast, operations_snapshot,
-    health_score,
+    menu_rankings, customer_intelligence, revenue_breakdown, forecast,
+    operations_snapshot, health_score,
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
@@ -255,12 +255,15 @@ async def branches(days: int = 7):
 
 @api.get("/menu")
 async def menu(days: int = 30):
-    perf = menu_performance(days)
+    # top/bottom come back disjoint. perf[:5] and perf[-5:] overlap on any
+    # catalog under 10 items — Square returns 6, so four dishes appeared under
+    # both "Most Profitable" and "Underperforming" with identical numbers.
+    r = menu_rankings(days)
     return {
         "days": days,
-        "top": perf[:5],
-        "bottom": perf[-5:],
-        "all": perf,
+        "top": r["top"],
+        "bottom": r["bottom"],
+        "all": r["all"],
     }
 
 

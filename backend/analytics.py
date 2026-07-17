@@ -258,6 +258,33 @@ def menu_performance(days: int = 30) -> List[Dict]:
     return out
 
 
+def menu_rankings(days: int = 30, limit: int = 5) -> Dict:
+    """Best/worst menu performers as DISJOINT lists.
+
+    The two lists must never share an item. Slicing perf[:5] and perf[-5:]
+    independently only stays disjoint while the catalog has 10+ items; Square
+    returns 6, so four dishes landed in BOTH "Most Profitable" and
+    "Underperforming" with identical numbers. The same overlap fed the AI via
+    top_menu_30d / bottom_menu_30d, letting it call one dish a best-seller and
+    an underperformer in the same answer.
+
+    Each list is capped at half the catalog, so they stay disjoint at any
+    catalog size; with an odd count the middle item belongs to neither, which
+    is correct — it is neither a top nor a bottom performer. A catalog of 0 or
+    1 items yields two empty lists: nothing there can be ranked against
+    anything.
+
+    Returns {all, top, bottom}; `all` is the full ranking (revenue desc).
+    """
+    perf = menu_performance(days)
+    k = min(limit, len(perf) // 2)
+    return {
+        "all": perf,
+        "top": perf[:k],
+        "bottom": perf[len(perf) - k:] if k else [],
+    }
+
+
 def customer_intelligence() -> Dict:
     customers = _customers()
     vip = [c for c in customers if "vip" in c["tags"]]
@@ -869,6 +896,7 @@ def restaurant_context() -> Dict:
     """Compact, structured snapshot injected into the AI system prompt."""
     today = today_kpis()
     rb = revenue_breakdown(30)
+    menu_rank = menu_rankings(30)
     return {
         "today": today,
         "health": health_score(),
@@ -880,8 +908,11 @@ def restaurant_context() -> Dict:
             "by_day_14d": rb["by_day"][-14:],     # last 14 days of daily revenue
         },
         "branches_7d": branch_performance(7),
-        "top_menu_30d": menu_performance(30)[:5],
-        "bottom_menu_30d": menu_performance(30)[-3:],
+        # Disjoint by construction — see menu_rankings(). Slicing [:5] and [-3:]
+        # off a 6-item catalog put the same dish in both lists, letting the AI
+        # call one item a best-seller and an underperformer in one answer.
+        "top_menu_30d": menu_rank["top"],
+        "bottom_menu_30d": menu_rank["bottom"],
         "customers": {k: v for k, v in customer_intelligence().items()
                       if k not in ("top_vips", "at_risk_list")},
         "operations": operations_snapshot(),

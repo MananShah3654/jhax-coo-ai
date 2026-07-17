@@ -279,6 +279,15 @@ class Employee(Base):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
+    # --- Payroll attributes ---
+    title: Mapped[str | None] = mapped_column(String(64), nullable=True)  # role
+    hourly_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tax_declared: Mapped[bool] = mapped_column(Boolean, default=False)
+    advance_taken: Mapped[bool] = mapped_column(Boolean, default=False)
+    advance_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    advance_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -288,12 +297,20 @@ class Employee(Base):
 
     def to_dict(self) -> dict:
         name = " ".join(p for p in (self.given_name, self.family_name) if p)
+        adv = self.advance_date
+        if adv is not None and adv.tzinfo is None:
+            adv = adv.replace(tzinfo=timezone.utc)
         return {
             "id": self.id, "square_id": self.square_id, "name": name or None,
             "given_name": self.given_name, "family_name": self.family_name,
             "email": self.email, "phone": self.phone, "status": self.status,
             "is_owner": self.is_owner, "restaurant_id": self.restaurant_id,
             "square_location_id": self.square_location_id,
+            "title": self.title, "hourly_rate": self.hourly_rate,
+            "tax_declared": self.tax_declared,
+            "advance_taken": self.advance_taken,
+            "advance_amount": self.advance_amount,
+            "advance_date": adv.isoformat() if adv else None,
         }
 
 
@@ -325,6 +342,13 @@ class Shift(Base):
     )
     status: Mapped[str] = mapped_column(String(16), default="OPEN")
     declared_tips: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Break length for this shift, in hours (e.g. 0.5 = 30 min, 0.17 = 10 min).
+    break_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    # Whether the employee took their meal during this shift.
+    meal_taken: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Attendance flags (used by the Team labor KPIs).
+    late_clockin: Mapped[bool] = mapped_column(Boolean, default=False)
+    missed_clockin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -340,6 +364,12 @@ class Shift(Base):
                 v = v.replace(tzinfo=timezone.utc)
             return v.isoformat()
 
+        # Net hours worked = span minus the break (None while a shift is open).
+        hours_worked = None
+        if self.clock_in and self.clock_out:
+            span = (self.clock_out - self.clock_in).total_seconds() / 3600.0
+            hours_worked = round(span - (self.break_hours or 0.0), 2)
+
         return {
             "id": self.id, "square_id": self.square_id,
             "employee_id": self.employee_id,
@@ -348,6 +378,10 @@ class Shift(Base):
             "square_location_id": self.square_location_id,
             "clock_in": _iso(self.clock_in), "clock_out": _iso(self.clock_out),
             "status": self.status, "declared_tips": self.declared_tips,
+            "break_hours": self.break_hours, "meal_taken": self.meal_taken,
+            "late_clockin": self.late_clockin,
+            "missed_clockin": self.missed_clockin,
+            "hours_worked": hours_worked,
         }
 
 
@@ -368,6 +402,20 @@ def init_db() -> None:
             text("ALTER TABLE restaurants "
                  "ADD COLUMN IF NOT EXISTS square_location_id VARCHAR(64)")
         )
+        # Payroll columns on the Square-synced staff/shift tables.
+        for ddl in (
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS title VARCHAR(64)",
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS hourly_rate DOUBLE PRECISION",
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS tax_declared BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS advance_taken BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS advance_amount DOUBLE PRECISION",
+            "ALTER TABLE team_members ADD COLUMN IF NOT EXISTS advance_date TIMESTAMPTZ",
+            "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS break_hours DOUBLE PRECISION DEFAULT 0.0",
+            "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS meal_taken BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS late_clockin BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS missed_clockin BOOLEAN DEFAULT FALSE",
+        ):
+            conn.execute(text(ddl))
 
 
 # -------------------- PIN quick-unlock helpers --------------------

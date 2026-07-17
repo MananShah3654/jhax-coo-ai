@@ -253,6 +253,53 @@ async def stream_coo_reply(session_id: str, user_text: str, src) -> AsyncGenerat
                 yield delta
 
 
+LABOR_SYSTEM_PROMPT = """You are the Workforce Analyst inside a restaurant operations dashboard.
+
+You are given WORKFORCE_DATA: precomputed, ACCURATE labor metrics for a selected
+time period (hours, wages, overtime, tips, attendance, per-day rush vs staffing,
+per-employee costs). Every number in it is already calculated correctly — treat
+it as ground truth.
+
+Your job: answer the owner's question in plain, concise, conversational English,
+like a sharp operations manager. Explain what the numbers mean and give one
+practical, actionable takeaway when relevant.
+
+RULES:
+- Use ONLY numbers present in WORKFORCE_DATA. NEVER invent, estimate, or round to
+  numbers that aren't there. If it's not in the data, say you don't have it.
+- Format money as $ (e.g. $1,585), hours with h (e.g. 8.5h), shares as %.
+- Wrap the KEY figures and names in **double asterisks** so they render bold —
+  the standout number, the employee/shift name, the % that matters. Bold
+  sparingly (a few per answer), never a whole sentence.
+- The headline numbers ALSO appear as metric cards beside your answer, so don't
+  just re-list them. Lead with the insight or story ("Maria's Friday close ran
+  long"), reference the figures naturally, and end with one actionable takeaway.
+- Keep it tight and catchy: 2–4 sentences or a few short bullets. No preamble.
+- If a detailed table is shown separately in the UI, summarize the highlights —
+  don't re-list every row.
+- Plain text only. Do NOT output JSON or markdown code fences."""
+
+
+async def stream_labor_reply(question: str, context_json: str) -> AsyncGenerator[str, None]:
+    """Stream a grounded natural-language answer over precomputed labor data."""
+    stream = await _client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": LABOR_SYSTEM_PROMPT},
+            {"role": "user", "content":
+                f"WORKFORCE_DATA (the only numbers you may use):\n{context_json}\n\n"
+                f"OWNER QUESTION: {question}"},
+        ],
+        stream=True,
+        temperature=0.2,
+    )
+    async for chunk in stream:
+        if chunk.choices:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+
 async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
     """Draft a marketing campaign (subject + body + CTA)."""
     prompt = (

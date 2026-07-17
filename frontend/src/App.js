@@ -12,6 +12,8 @@ import PinLock from "@/screens/PinLock";
 import Home from "@/screens/Home";
 import Chat from "@/screens/Chat";
 import Branches from "@/screens/Branches";
+import Team from "@/screens/Team";
+import TeamEmployee from "@/screens/TeamEmployee";
 import Customers from "@/screens/Customers";
 import Menu from "@/screens/Menu";
 import Marketing from "@/screens/Marketing";
@@ -126,6 +128,22 @@ function AppRoutes() {
                 element={
                     <Protected>
                         <Branches />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/team"
+                element={
+                    <Protected>
+                        <Team />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/team/employee/:employeeId"
+                element={
+                    <Protected>
+                        <TeamEmployee />
                     </Protected>
                 }
             />

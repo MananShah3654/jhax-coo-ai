@@ -488,6 +488,7 @@ async def _on_startup():
 from crud_routes import crud  # noqa: E402
 
 app.include_router(api)
+app.include_router(crud)  # /api/restaurants, /api/menu, /api/customers, /api/orders, /api/employees
 app.include_router(twilio_auth_router)  # /api/auth/send-otp, /api/auth/verify-otp
 app.add_middleware(
     CORSMiddleware,

@@ -230,6 +230,8 @@ async def dashboard():
         "health": health_score(),
         "briefing": daily_briefing(),
         "branches_top3": branch_performance(7)[:3],
+        # Last 14 days of daily revenue for the Total Revenue sparkline.
+        "revenue_14d": revenue_breakdown(30)["by_day"][-14:],
         "data_source": DS.name,
     }
 

@@ -184,9 +184,14 @@ _SQUARE_VERSION = "2024-10-17"
 #   1. SQUARE_SEAT_CAPACITY env (JSON) keyed by location id OR name (case-insensitive)
 #   2. _SQUARE_DEFAULT_CAPACITY (tunable via SQUARE_DEFAULT_SEATS/_TABLES)
 # Example: SQUARE_SEAT_CAPACITY='{"LA8VJR69N9V6E": {"seats": 64, "tables": 16}}'
-_SQUARE_DEFAULT_CAPACITY = {
-    "seats": int(os.environ.get("SQUARE_DEFAULT_SEATS", "64") or 64),
-    "tables": int(os.environ.get("SQUARE_DEFAULT_TABLES", "16") or 16),
+# Only a capacity the operator explicitly declared counts. Absent the env vars
+# this stays empty, so seats/tables resolve to 0 and the seating KPIs degrade to
+# "—" rather than inventing a denominator.
+_SQUARE_DECLARED_DEFAULT = {
+    k: int(v) for k, v in (
+        ("seats", os.environ.get("SQUARE_DEFAULT_SEATS")),
+        ("tables", os.environ.get("SQUARE_DEFAULT_TABLES")),
+    ) if v
 }
 
 
@@ -207,11 +212,20 @@ _SQUARE_CAPACITY = _load_square_capacity()
 
 
 def _square_capacity(loc_id: str | None, name: str | None) -> Dict[str, int]:
-    """Seats/tables for a Square location, matched by id then name, else default."""
+    """Seats/tables for a Square location, matched by id then name.
+
+    Returns zeros when the operator has NOT declared a capacity for this
+    location. Square exposes no seating data, so the fallback default is an
+    assumption, not a measurement — feeding it to Table Turnover / RevPASH
+    produces numbers that look measured but rest on an invented denominator.
+    Zeros make analytics report those KPIs as None ("—") instead. Declare real
+    seating via SQUARE_SEAT_CAPACITY (or SQUARE_DEFAULT_SEATS/_TABLES) to opt in
+    with numbers you can vouch for.
+    """
     cap = (
         _SQUARE_CAPACITY.get((loc_id or "").lower())
         or _SQUARE_CAPACITY.get((name or "").lower())
-        or _SQUARE_DEFAULT_CAPACITY
+        or _SQUARE_DECLARED_DEFAULT      # {} unless explicitly configured
     )
     return {"seats": int(cap.get("seats") or 0), "tables": int(cap.get("tables") or 0)}
 

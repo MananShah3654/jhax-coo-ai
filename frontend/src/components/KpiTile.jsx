@@ -9,6 +9,8 @@ import { fmtUsd, fmtPct } from "@/lib/api";
  * prefix — unit prepended (e.g. "$" when not using the `money` currency format)
  * change — optional delta % (green up / red down arrow)
  * naHint — sublabel shown when the value is unavailable (null) on the active source
+ * chart  — optional node (e.g. <Sparkline/>) rendered beside the value; hidden
+ *          when the value is unavailable, since there's no trend to draw
  */
 export default function KpiTile({
     label,
@@ -21,6 +23,7 @@ export default function KpiTile({
     naHint = "Not tracked on this source",
     testId,
     icon = null,
+    chart = null,
 }) {
     const isNil = value === null || value === undefined || value === "";
     const up = change > 0;
@@ -58,6 +61,7 @@ export default function KpiTile({
                         {fmtPct(change)}
                     </div>
                 )}
+                {!isNil && chart && <div className="ml-auto shrink-0">{chart}</div>}
             </div>
             {(sublabel || isNil) && (
                 <div className="text-xs text-slate-500">

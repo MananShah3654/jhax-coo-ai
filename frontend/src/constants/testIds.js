@@ -38,6 +38,7 @@ export const TID = {
 
     // Layout
     navHome: "nav-home",
+    navKpis: "nav-kpis",
     navChat: "nav-chat",
     navBranches: "nav-branches",
     navCustomers: "nav-customers",

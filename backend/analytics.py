@@ -65,6 +65,17 @@ def _carts():
     return fn() if callable(fn) else []
 
 
+def _discounts_supported() -> bool:
+    """True when the active source records discounts on any order.
+
+    Square carries no discount data at all (verified: 0 of 300 sandbox orders
+    have a discount), so every discount-derived figure there would be a
+    structural 0 masquerading as a measurement. Mock and JhaPOS do record them,
+    and a genuinely discount-free window on those sources still reports 0.0%.
+    """
+    return any(o.get("discount") for o in _orders())
+
+
 def _carts_supported() -> bool:
     """True when the active data source can report abandoned-cart sessions.
 
@@ -128,8 +139,14 @@ def kpi_window(start: datetime, end: datetime, branch_id: str | None = None) -> 
     covers = sum(o.get("party_size") or 1 for o in orders)
 
     # --- Average discount %: total discount as a share of subtotal ---
+    # None (not 0.0) when the source records no discounts at all: a flat "0%"
+    # reads as "we never discount" when the truth is "not tracked here".
     discount_total = sum(o.get("discount", 0.0) for o in orders)
-    avg_discount_pct = (discount_total / subtotal * 100) if subtotal else 0.0
+    avg_discount_pct = (
+        round(discount_total / subtotal * 100, 1)
+        if subtotal and _discounts_supported()
+        else None
+    )
 
     # --- Seating KPIs (dine-in only) — need physical capacity ---
     num_days = (end - start).total_seconds() / 86400.0
@@ -163,7 +180,7 @@ def kpi_window(start: datetime, end: datetime, branch_id: str | None = None) -> 
         "covers":             covers,
         "customers":          unique_customers,
         "avg_order_value":    round(aov, 2),
-        "avg_discount_pct":   round(avg_discount_pct, 1),
+        "avg_discount_pct":   avg_discount_pct,
         "table_turnover":     table_turnover,
         "revpash":            revpash,
         "cart_abandonment_pct": cart_abandonment_pct,
@@ -437,6 +454,11 @@ _REVIEW_SENTIMENT_UNAVAILABLE = {
     "signal": "review_sentiment", "status": "insufficient_data",
     "note": "No review/sentiment source connected (Square returns no ratings). "
             "Order `rating` exists in mock only — wire a reviews source to enable."}
+_DISCOUNT_UNAVAILABLE = {
+    "signal": "discount_overuse", "status": "insufficient_data",
+    "note": "This source records no discounts on orders (Square returns none), so "
+            "discount overuse cannot be measured — a 0% average here would be a "
+            "structural zero, not a finding."}
 
 
 _PAYMENT_BUCKETS = ("card", "cash", "other")
@@ -596,6 +618,8 @@ def _unavailable_signals() -> List[Dict]:
     out = []
     if not _carts_supported():
         out.append(_CART_ABANDONMENT_UNAVAILABLE)
+    if not _discounts_supported():
+        out.append(_DISCOUNT_UNAVAILABLE)
     out.append(_REVIEW_SENTIMENT_UNAVAILABLE)
     return out
 
@@ -777,10 +801,16 @@ def score_causes(checkpoint_hour: int | None = None,
         {"signal": "repeat_customer", "today_value": round(r_today * 100, 1),
          "baseline_value": round(r_base * 100, 1), "delta_pct": round(r_delta, 1),
          "contribution_pct": None, "noisy": bool(r_noisy)},   # leading indicator
-        {"signal": "discount_overuse", "today_value": round(d_today * 100, 1),
-         "baseline_value": round(d_base * 100, 1), "delta_pct": round(d_delta, 1),
-         "contribution_pct": _contrib(disc_loss)},
     ]
+    # Only rank discount-overuse where discounts are actually recorded. On a
+    # source that carries none (Square), today and baseline are both a structural
+    # 0.0% and "Avg discount 0.0% vs 0.0% baseline" would read as a measurement
+    # that had been taken. It goes to unavailable_signals instead.
+    if _discounts_supported():
+        signals.append(
+            {"signal": "discount_overuse", "today_value": round(d_today * 100, 1),
+             "baseline_value": round(d_base * 100, 1), "delta_pct": round(d_delta, 1),
+             "contribution_pct": _contrib(disc_loss)})
     for s in signals:
         s["weight"] = CAUSE_WEIGHTS[s["signal"]]
         s["adverse"] = _ADVERSE[s["signal"]]

@@ -22,6 +22,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
 import HealthRing from "@/components/HealthRing";
 import KpiTile from "@/components/KpiTile";
+import Sparkline from "@/components/Sparkline";
 import VoiceMic from "@/components/VoiceMic";
 import { openShareModal } from "@/components/ShareModal";
 import { TID } from "@/constants/testIds";
@@ -257,7 +258,10 @@ export default function Home() {
                     change={t.vs_yesterday_pct}
                     money
                     icon={<DollarSign size={16} className="text-slate-300" />}
-                    sublabel="vs. yesterday"
+                    sublabel="vs. yesterday · 14-day trend"
+                    chart={
+                        <Sparkline points={(data.revenue_14d || []).map((d) => d.revenue)} />
+                    }
                 />
                 <KpiTile
                     testId={TID.kpiCovers}

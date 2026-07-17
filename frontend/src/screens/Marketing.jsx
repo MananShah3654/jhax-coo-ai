@@ -82,8 +82,7 @@ export default function Marketing() {
 
     // AI Combo builder (data-grounded offer from best-sellers + sales trends)
     const [combo, setCombo] = useState(null);
-    const [comboBusy, setComboBusy] = useState(false)
-    ;
+    const [comboBusy, setComboBusy] = useState(false);
 
     // Pick up prefill from /home → Launch Campaign or from an AI action button
     useEffect(() => {

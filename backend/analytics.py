@@ -521,6 +521,60 @@ def payment_breakdown(days: int = 30, item_name: str | None = None,
     }
 
 
+def monthly_profit_loss(branch_id: str | None = None) -> Dict:
+    """ESTIMATED gross profit for the current calendar month, month-to-date.
+
+    profit = gross sales - estimated cost of goods - discounts
+
+    Revenue basis is line items (sum of price x qty), NOT order subtotal. The
+    two sources disagree on what `subtotal` means: mock's is pre-discount
+    (total = subtotal - discount + tax + tip) while Square's is derived as
+    total - tax - tip and Square's total is already net of discounts. Summing
+    line items is pre-discount on both, so subtracting `discount` here stays
+    correct on either source instead of double-counting on Square. Tax and tips
+    are excluded — neither is the restaurant's money.
+
+    THIS IS AN ESTIMATE, NOT BOOKKEEPING. Cost of goods comes from
+    data_source._estimate_cost(), a flat share of menu price (32% food / 22%
+    beverage) — there are no supplier invoices in any data source. It is also
+    GROSS profit only: labour, rent, utilities and every other operating cost
+    are absent, so the real bottom line is materially lower. `is_estimate`,
+    `excludes` and `caveat` carry that to the AI so it can't be quoted as fact.
+    """
+    start = _today().replace(day=1)
+    end = _today() + timedelta(days=1)
+    orders = orders_between(start, end, branch_id)
+
+    gross_sales = sum(li.get("price", 0) * li.get("qty", 0)
+                      for o in orders for li in o.get("items", []))
+    cogs = sum(li.get("cost", 0) * li.get("qty", 0)
+               for o in orders for li in o.get("items", []))
+    discounts = sum(o.get("discount", 0) for o in orders)
+    profit = gross_sales - cogs - discounts
+
+    return {
+        "month": start.strftime("%Y-%m"),
+        "window": f"{start.date()} to {(end - timedelta(days=1)).date()} (month-to-date)",
+        "days_elapsed": (end - start).days,
+        "orders": len(orders),
+        "gross_sales": round(gross_sales, 2),
+        "cogs_estimated": round(cogs, 2),
+        "discounts": round(discounts, 2),
+        "gross_profit_estimated": round(profit, 2),
+        "gross_margin_pct": round(profit / gross_sales * 100, 1) if gross_sales else 0.0,
+        "is_estimate": True,
+        "cogs_method": "flat share of menu price (32% food / 22% beverage) — no supplier invoices exist",
+        "excludes": ["labour", "rent", "utilities", "marketing spend",
+                     "equipment", "taxes", "tips (staff money)"],
+        "caveat": ("Estimated GROSS profit, not bookkeeping. Cost of goods is modelled "
+                   "as a flat share of menu price, not real invoices, and labour/rent/"
+                   "overhead are excluded — true net profit is lower."),
+        # Square records no discounts, so the discount term is structurally $0
+        # there; flag it rather than let $0.00 read as "nobody used a promo".
+        "discounts_tracked": any(o.get("discount") for o in orders),
+    }
+
+
 def payment_context() -> Dict:
     """30-day plus day-scoped payment splits for the AI context."""
     d0 = _today()
@@ -811,4 +865,7 @@ def restaurant_context() -> Dict:
         # today/yesterday/this-week windows so scoped questions don't get a
         # 30-day number. tracked_orders=0 means the source records no payments.
         **payment_context(),
+        # Month-to-date ESTIMATED gross profit. Modelled COGS, no overheads —
+        # is_estimate/excludes/caveat exist so it's never quoted as bookkeeping.
+        "profit_mtd": monthly_profit_loss(),
     }

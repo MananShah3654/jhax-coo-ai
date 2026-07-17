@@ -15,6 +15,7 @@ import Branches from "@/screens/Branches";
 import Customers from "@/screens/Customers";
 import Menu from "@/screens/Menu";
 import Marketing from "@/screens/Marketing";
+import CampaignRoi from "@/screens/CampaignRoi";
 import Promotions from "@/screens/Promotions";
 import Forecast from "@/screens/Forecast";
 import Manager from "@/screens/Manager";
@@ -150,6 +151,14 @@ function AppRoutes() {
                 element={
                     <Protected>
                         <Marketing />
+                    </Protected>
+                }
+            />
+            <Route
+                path="/campaign-roi"
+                element={
+                    <Protected>
+                        <CampaignRoi />
                     </Protected>
                 }
             />

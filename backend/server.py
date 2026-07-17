@@ -48,7 +48,7 @@ from data_source import get_source  # noqa: E402
 from analytics import (  # noqa: E402
     today_kpis, daily_briefing, branch_performance, menu_performance,
     menu_rankings, customer_intelligence, revenue_breakdown, forecast,
-    operations_snapshot, health_score,
+    operations_snapshot, health_score, campaign_roi,
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
@@ -514,6 +514,37 @@ async def whatsapp_send(req: WhatsAppSendRequest, db: Session = Depends(get_db))
         "logged": True,
         "campaign": row.as_dict(),
         "template_caveat": _WA_TEMPLATE_CAVEAT,
+    }
+
+
+_ROI_DISCLAIMER = (
+    "Before/after estimate, not attribution. This compares the targeted segment's "
+    "orders in the 7 days after the send against the 7 days before it. It cannot "
+    "tell a campaign-driven order from a coincidence, a weekend or the weather — "
+    "nothing here tracks redemptions."
+)
+
+
+@api.get("/campaigns/roi")
+async def campaigns_roi(db: Session = Depends(get_db)):
+    """Past sent campaigns with a real before/after read on each."""
+    rows = (
+        db.query(SentCampaign)
+        .order_by(SentCampaign.sent_at.desc())
+        .limit(50)
+        .all()
+    )
+    out = []
+    for r in rows:
+        out.append({**r.as_dict(), "roi": campaign_roi(r.sent_at, r.audience)})
+    return {
+        "campaigns": out,
+        "disclaimer": _ROI_DISCLAIMER,
+        # Square's demo mode fabricates order timestamps, which makes any
+        # before/after window arithmetic over invented history. Say so loudly
+        # rather than let the numbers look earned.
+        "synthetic_dates": bool(getattr(DS, "demo_spread_days", 0)),
+        "data_source": DS.name,
     }
 
 

@@ -982,6 +982,96 @@ def revenue_diagnosis(checkpoint_hour: int | None = None,
     }
 
 
+def _segment_customer_ids(audience: str) -> set:
+    """Customer ids in a segment, using the same vip/at_risk/new tags the
+    broadcast targeted. "all" is every customer."""
+    seg = (audience or "all").strip().lower()
+    cs = _customers()
+    if seg in ("", "all"):
+        return {c["id"] for c in cs if c.get("id")}
+    return {c["id"] for c in cs if seg in (c.get("tags") or []) and c.get("id")}
+
+
+def _synthetic_dates() -> bool:
+    """True when the active source fabricates order timestamps (Square demo
+    date-spreading). Any before/after comparison over those dates is arithmetic
+    on invented history, so the ROI screen must say so."""
+    return bool(getattr(DS, "demo_spread_days", 0))
+
+
+def campaign_roi(sent_at: datetime, audience: str, window_days: int = 7) -> Dict:
+    """That segment's orders/revenue in the `window_days` AFTER a send vs before.
+
+    Same shape of baseline as revenue_diagnosis: compare a window against a
+    matched earlier window rather than against a single adjacent day. Here the
+    matched window is the equal-length stretch immediately before the send, and
+    it is scoped to the customers the campaign actually targeted — a store-wide
+    lift tells you nothing about whether the broadcast worked.
+
+    Returns status="still_measuring" until the full after-window has elapsed.
+    A partial window would read as a real result while mechanically being a
+    smaller number than the before-window it's compared against, i.e. an
+    invented decline. Better to show nothing.
+
+    THIS IS NOT ATTRIBUTION. It cannot tell a campaign-driven order from a
+    coincidence, a weekend, or the weather. Nothing here tracks redemptions.
+    """
+    now = datetime.now(timezone.utc)
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    after_end = sent_at + timedelta(days=window_days)
+    before_start = sent_at - timedelta(days=window_days)
+
+    base = {
+        "audience": audience,
+        "window_days": window_days,
+        "sent_at": sent_at.isoformat(),
+        "window_closes": after_end.isoformat(),
+        "synthetic_dates": _synthetic_dates(),
+    }
+
+    if now < after_end:
+        remaining = (after_end - now).total_seconds() / 86400.0
+        return {
+            **base,
+            "status": "still_measuring",
+            "days_remaining": max(1, int(remaining + 0.999)),  # round up; never 0
+        }
+
+    ids = _segment_customer_ids(audience)
+    if not ids:
+        return {**base, "status": "no_segment",
+                "note": f"No customers currently carry the '{audience}' tag."}
+
+    def _window(start: datetime, end: datetime) -> Dict:
+        os_ = [o for o in orders_between(start, end)
+               if o.get("customer_id") in ids]
+        return {
+            "orders": len(os_),
+            "revenue": round(sum(o.get("total", 0) for o in os_), 2),
+            "customers": len({o["customer_id"] for o in os_ if o.get("customer_id")}),
+        }
+
+    before = _window(before_start, sent_at)
+    after = _window(sent_at, after_end)
+
+    def _delta(a: float, b: float):
+        # None, not 0, when there's no baseline to compare against: "+100%" off
+        # a zero base is meaningless.
+        return None if not b else round((a - b) / b * 100, 1)
+
+    return {
+        **base,
+        "status": "measured",
+        "segment_size": len(ids),
+        "before": before,
+        "after": after,
+        "revenue_delta_pct": _delta(after["revenue"], before["revenue"]),
+        "orders_delta_pct": _delta(after["orders"], before["orders"]),
+        "revenue_change": round(after["revenue"] - before["revenue"], 2),
+    }
+
+
 def restaurant_context() -> Dict:
     """Compact, structured snapshot injected into the AI system prompt."""
     today = today_kpis()

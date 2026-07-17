@@ -37,6 +37,11 @@ export const TID = {
     unlockForgot: "unlock-forgot",
 
     // Layout
+    roiTable: "roi-table",
+    roiEmpty: "roi-empty",
+    roiSyntheticWarning: "roi-synthetic-warning",
+    navCampaignRoi: "nav-campaign-roi",
+
     waSend: "wa-send",
     waApproval: "wa-approval",
     waApprove: "wa-approve",

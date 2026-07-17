@@ -43,7 +43,6 @@ export const TID = {
     campBannerReady: "camp-banner-ready",
 
     navHome: "nav-home",
-    navKpis: "nav-kpis",
     navChat: "nav-chat",
     navBranches: "nav-branches",
     navCustomers: "nav-customers",

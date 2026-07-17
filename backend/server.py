@@ -30,7 +30,8 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
+import hashlib
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -46,8 +47,8 @@ from mock_data import DATASET  # noqa: E402  (kept for backwards compat)
 from data_source import get_source  # noqa: E402
 from analytics import (  # noqa: E402
     today_kpis, daily_briefing, branch_performance, menu_performance,
-    customer_intelligence, revenue_breakdown, forecast, operations_snapshot,
-    health_score,
+    menu_rankings, customer_intelligence, revenue_breakdown, forecast,
+    operations_snapshot, health_score, campaign_roi,
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
@@ -55,8 +56,9 @@ from ai_service import (  # noqa: E402
 )
 from pdf_report import build_report_pdf  # noqa: E402
 from database import (  # noqa: E402
-    User, get_db, init_db, set_user_pin, verify_user_pin,
+    SentCampaign, User, get_db, init_db, set_user_pin, verify_user_pin,
 )
+import whatsapp  # noqa: E402
 from auth import get_current_user  # noqa: E402
 from twilio_auth import router as twilio_auth_router  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
@@ -88,6 +90,24 @@ class CampaignImageRequest(BaseModel):
     description: str
     style: str | None = "photorealistic"
     seed: int | None = None
+
+
+class WhatsAppPreviewRequest(BaseModel):
+    audience: str                    # vip | at_risk | new | all
+    message: str
+    banner_url: str | None = None
+
+
+class WhatsAppSendRequest(WhatsAppPreviewRequest):
+    # Must be explicitly true. The owner approves in the UI after seeing the
+    # audience count and message preview; there is no silent auto-send path.
+    approved: bool = False
+
+
+class SquarePromoRequest(BaseModel):
+    name: str
+    discount: float                 # percent off, 0 < d < 100
+    items: list[str] | None = None  # recorded for context; Square gets the discount
 
 
 class ComboRequest(BaseModel):
@@ -214,6 +234,8 @@ async def dashboard(user: User = Depends(get_current_user)):
         "health": health_score(src),
         "briefing": daily_briefing(src),
         "branches_top3": branch_performance(src, 7)[:3],
+        # Last 14 days of daily revenue, kept for API consumers.
+        "revenue_14d": revenue_breakdown(src, 30)["by_day"][-14:],
         "data_source": src.name,
     }
 
@@ -230,12 +252,15 @@ async def branches(days: int = 7, user: User = Depends(get_current_user)):
 
 @api.get("/menu")
 async def menu(days: int = 30, user: User = Depends(get_current_user)):
-    perf = menu_performance(get_source(user.id), days)
+    # top/bottom come back disjoint. perf[:5] and perf[-5:] overlap on any
+    # catalog under 10 items — Square returns 6, so four dishes appeared under
+    # both "Most Profitable" and "Underperforming" with identical numbers.
+    r = menu_rankings(get_source(user.id), days)
     return {
         "days": days,
-        "top": perf[:5],
-        "bottom": perf[-5:],
-        "all": perf,
+        "top": r["top"],
+        "bottom": r["bottom"],
+        "all": r["all"],
     }
 
 
@@ -384,6 +409,190 @@ async def combos_generate(req: ComboRequest):
     except Exception as e:
         logger.exception("Combo generation error")
         raise HTTPException(500, f"Combo generation failed: {e}")
+
+
+_WA_TEMPLATE_CAVEAT = (
+    "Meta only allows free-form WhatsApp messages within 24 hours of a customer's "
+    "last reply. Outside that window a pre-approved message template is required, "
+    "so most promo sends to lapsed customers will be rejected with error 131047. "
+    "Templates aren't wired up yet — sends are attempted as free-form text and "
+    "Meta's verdict is reported as-is."
+)
+
+
+@api.get("/campaigns/whatsapp/status")
+async def whatsapp_status():
+    """Whether WhatsApp is usable, and why not if it isn't."""
+    return {**whatsapp.config_status(), "template_caveat": _WA_TEMPLATE_CAVEAT}
+
+
+@api.post("/campaigns/whatsapp/preview")
+async def whatsapp_preview(
+    req: WhatsAppPreviewRequest,
+    user: User = Depends(get_current_user),
+):
+    """Audience size + exact message — the approval gate. Sends NOTHING."""
+    aud = whatsapp.resolve_audience(get_source(user.id).customers(), req.audience)
+    body = req.message if not req.banner_url else f"{req.message}\n\n{req.banner_url}"
+    return {
+        **whatsapp.config_status(),
+        "audience": aud["audience"],
+        "matched": aud["matched"],
+        "recipient_count": len(aud["recipients"]),
+        # A few real numbers so the owner can sanity-check who this reaches.
+        "sample_recipients": aud["recipients"][:5],
+        "unreachable": aud["unreachable"],
+        "duplicates": aud["duplicates"],
+        "message_preview": body,
+        "banner_url": req.banner_url,
+        "template_caveat": _WA_TEMPLATE_CAVEAT,
+        "requires_approval": True,
+    }
+
+
+@api.post("/campaigns/whatsapp/send")
+async def whatsapp_send(
+    req: WhatsAppSendRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Send the broadcast — only with explicit owner approval.
+
+    Logs to sent_campaigns ONLY when a real send was attempted, so the Campaign
+    ROI screen never shows a campaign that didn't go out. A refusal (not
+    approved / not configured / nobody reachable) writes nothing.
+    """
+    if not req.approved:
+        raise HTTPException(400, "Owner approval required before sending.")
+    if not whatsapp.is_configured():
+        # Honest refusal — not an exception, so the UI can render the state.
+        return {
+            "ok": False, "sent": 0, "failed": 0, "logged": False,
+            "error": "WhatsApp not configured",
+            **whatsapp.config_status(),
+            "template_caveat": _WA_TEMPLATE_CAVEAT,
+        }
+    aud = whatsapp.resolve_audience(get_source(user.id).customers(), req.audience)
+    if not aud["recipients"]:
+        return {
+            "ok": False, "sent": 0, "failed": 0, "logged": False,
+            "configured": True,
+            "error": f"No reachable recipients in '{aud['audience']}'.",
+            "unreachable": aud["unreachable"],
+        }
+
+    result = whatsapp.send_broadcast(aud["recipients"], req.message, req.banner_url)
+
+    status = "sent" if result["sent"] and not result["failed"] else \
+             "partial" if result["sent"] else "failed"
+    row = SentCampaign(
+        audience=aud["audience"],
+        channel="whatsapp",
+        message=req.message[:4096],
+        banner_url=req.banner_url,
+        recipient_count=len(aud["recipients"]),
+        sent_count=result["sent"],
+        failed_count=result["failed"],
+        status=status,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    logger.info("WhatsApp broadcast %s: %s sent, %s failed (audience=%s)",
+                status, result["sent"], result["failed"], aud["audience"])
+    return {
+        "ok": result["ok"],
+        "configured": True,
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "recipients": len(aud["recipients"]),
+        "status": status,
+        "needs_template": result.get("needs_template", 0),
+        "error": result.get("error"),
+        "logged": True,
+        "campaign": row.as_dict(),
+        "template_caveat": _WA_TEMPLATE_CAVEAT,
+    }
+
+
+_ROI_DISCLAIMER = (
+    "Before/after estimate, not attribution. This compares the targeted segment's "
+    "orders in the 7 days after the send against the 7 days before it. It cannot "
+    "tell a campaign-driven order from a coincidence, a weekend or the weather — "
+    "nothing here tracks redemptions."
+)
+
+
+@api.get("/campaigns/roi")
+async def campaigns_roi(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Past sent campaigns with a real before/after read on each."""
+    src = get_source(user.id)
+    rows = (
+        db.query(SentCampaign)
+        .order_by(SentCampaign.sent_at.desc())
+        .limit(50)
+        .all()
+    )
+    out = []
+    for r in rows:
+        out.append({**r.as_dict(), "roi": campaign_roi(src, r.sent_at, r.audience)})
+    return {
+        "campaigns": out,
+        "disclaimer": _ROI_DISCLAIMER,
+        # Square's demo mode fabricates order timestamps, which makes any
+        # before/after window arithmetic over invented history. Say so loudly
+        # rather than let the numbers look earned.
+        "synthetic_dates": bool(getattr(src, "demo_spread_days", 0)),
+        "data_source": src.name,
+    }
+
+
+@api.post("/promotions/square-push")
+async def promotions_square_push(
+    req: SquarePromoRequest,
+    user: User = Depends(get_current_user),
+):
+    """Create the promotion as a real DISCOUNT catalog object in Square.
+
+    Reports exactly what Square returned. Unlike the mocked /actions/execute
+    below, this touches a live POS catalog, so a failure must surface as a
+    failure — the UI shows Square's own error text rather than a success toast.
+    """
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Promotion needs a name.")
+    if not (0 < req.discount < 100):
+        raise HTTPException(400, "Discount must be between 0 and 100 percent.")
+    src = get_source(user.id)
+    pusher = getattr(src, "push_discount", None)
+    if not callable(pusher):
+        # Only SquareDataSource can push. Say so rather than pretend.
+        raise HTTPException(
+            400,
+            f"Active data source is '{src.name}', which has no Square catalog. "
+            "Set DATA_SOURCE=square to push promotions to the POS.",
+        )
+    # Same name + same discount => same key => Square returns the existing
+    # object instead of creating a duplicate on a double-click.
+    key = hashlib.sha256(
+        f"{name}|{req.discount}|{date.today().isoformat()}".encode("utf-8")
+    ).hexdigest()[:40]
+    result = pusher(name=name, percentage=req.discount, idempotency_key=key)
+    obj = ((result.get("response") or {}).get("catalog_object") or {}) if result.get("ok") else {}
+    return {
+        "ok": result["ok"],
+        "error": result["error"],
+        "square_status": result["status"],
+        "catalog_object_id": obj.get("id"),
+        "version": obj.get("version"),
+        # Square's verbatim body, so the UI/logs can show the real response.
+        "square_response": result["response"],
+        "pushed_at": datetime.now(timezone.utc).isoformat(),
+        "items": req.items or [],
+    }
 
 
 @api.post("/actions/execute")

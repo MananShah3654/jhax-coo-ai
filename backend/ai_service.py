@@ -138,6 +138,44 @@ active data source (e.g. Square exposes no seat capacity or cart funnel). Say
 Menu / best-seller: use top_menu_30d (units_sold, revenue, margin_pct) and
 bottom_menu_30d. Push a "promotion" action for menu/combo/discount levers.
 
+PAYMENT MIX ("what % of payments are card vs cash", "how do people pay"):
+- Pick the window that matches the question, never a wider one: "yesterday" ->
+  payments_yesterday. "today" -> payments_today. "this week" -> payments_this_week.
+  No window named / "lately" / "usually" -> payments_30d. State which window you used.
+- REVENUE BASIS IS MANDATORY. Every payment-mix answer must cite BOTH the dollar
+  amount and the percent from by_method[].revenue and by_method[].revenue_pct —
+  e.g. "Card $1,240 (62%), cash $610 (31%), other $140 (7%)". A bare percentage
+  is not an acceptable answer.
+- NEVER mix bases in one answer. by_method[].revenue / .revenue_pct are revenue
+  (dollars); by_method[].orders is a COUNT of orders. Do not present an
+  orders-basis number as a share of payments, and never blend the two — quoting
+  "62% of payments" from revenue_pct alongside an order count as if they measure
+  the same thing is wrong. Default to revenue basis; mention order counts only
+  when explicitly asked, and label them "orders" when you do.
+- If tracked_orders is 0, say exactly "no payment method recorded on this source"
+  and give NO split — no percentages, no dollars, no estimate. The `note` field
+  says the same thing. NEVER fabricate or infer a card/cash split.
+- untracked_orders > 0 means some orders in the window carry no tender yet
+  (unpaid/OPEN). The split covers tracked_revenue only — say so if it's material.
+- Per-item mix ("how do people pay for the BLT") uses payment_breakdown's item
+  scope: that item's line revenue attributed to each order's payment method.
+
+PROFIT / P&L ("what's our profit this month", "are we making money", "margin"):
+- Use profit_mtd. Headline profit_mtd.gross_profit_estimated with the dollar
+  amount and gross_margin_pct, and name the window (month-to-date, not a full month).
+- ALWAYS say it is an ESTIMATE in the same breath as the number — profit_mtd
+  .is_estimate is true. Two things make it one: cost of goods is modelled as a
+  flat share of menu price (profit_mtd.cogs_method), not real supplier invoices;
+  and it is GROSS profit only — everything in profit_mtd.excludes (labour, rent,
+  utilities, overhead) is missing, so true net profit is LOWER. Never present it
+  as bookkeeping, and never call it "net profit" or "the bottom line".
+- Put the caveat where the owner will read it, not buried: `reason` should carry
+  "estimate — excludes labour/rent" or equivalent.
+- If profit_mtd.discounts_tracked is false, the $0 discount line means the source
+  records no discounts — say "discounts not tracked on this source", NOT
+  "no discounts were given".
+- Never invent labour cost, rent, or any overhead figure to "complete" the P&L.
+
 RULES:
 - Be decisive. No hedging, no "it depends".
 - Ground every number in the RESTAURANT_CONTEXT provided in the user turn.
@@ -164,9 +202,18 @@ _CTX_TRIGGERS = {
     "sales_30d": ("channel", "hour", "daypart", "busy", "peak", "when", "where",
                   "breakdown", "trend", "week", "daily", "delivery", "takeout",
                   "to-go", "togo", "dine", "online", "source", "month"),
+    "payments": ("payment", "pay", "paid", "card", "cash", "tender", "swipe",
+                 "wallet", "credit", "debit"),
+    "profit_mtd": ("profit", "p&l", "pnl", "margin", "bottom line", "making money",
+                   "earnings", "net", "cogs", "cost of goods", "loss"),
 }
 _MENU_KEYS = ("top_menu_30d", "bottom_menu_30d")
-_HEAVY_KEYS = ("revenue_diagnosis", "sales_30d", *_MENU_KEYS)
+# All four windows ship together on a payment question so the model can pick the
+# one the question actually names instead of forcing a 30-day answer.
+_PAYMENT_KEYS = ("payments_30d", "payments_today", "payments_yesterday",
+                 "payments_this_week")
+_HEAVY_KEYS = ("revenue_diagnosis", "sales_30d", *_MENU_KEYS, *_PAYMENT_KEYS,
+               "profit_mtd")
 
 
 def _select_context(question: str, src) -> dict:
@@ -182,6 +229,12 @@ def _select_context(question: str, src) -> dict:
         for k in _MENU_KEYS:
             if k in ctx:
                 lean[k] = ctx[k]
+    if any(kw in q for kw in _CTX_TRIGGERS["payments"]):
+        for k in _PAYMENT_KEYS:
+            if k in ctx:
+                lean[k] = ctx[k]
+    if any(kw in q for kw in _CTX_TRIGGERS["profit_mtd"]):
+        lean["profit_mtd"] = ctx.get("profit_mtd")
     return lean
 
 

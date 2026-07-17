@@ -61,6 +61,17 @@ def _carts(src):
     return fn() if callable(fn) else []
 
 
+def _discounts_supported(src) -> bool:
+    """True when the active source records discounts on any order.
+
+    Square carries no discount data at all (verified: 0 of 300 sandbox orders
+    have a discount), so every discount-derived figure there would be a
+    structural 0 masquerading as a measurement. Mock and JhaPOS do record them,
+    and a genuinely discount-free window on those sources still reports 0.0%.
+    """
+    return any(o.get("discount") for o in _orders(src))
+
+
 def _carts_supported(src) -> bool:
     """True when the active data source can report abandoned-cart sessions.
 
@@ -124,8 +135,14 @@ def kpi_window(src, start: datetime, end: datetime, branch_id: str | None = None
     covers = sum(o.get("party_size") or 1 for o in orders)
 
     # --- Average discount %: total discount as a share of subtotal ---
+    # None (not 0.0) when the source records no discounts at all: a flat "0%"
+    # reads as "we never discount" when the truth is "not tracked here".
     discount_total = sum(o.get("discount", 0.0) for o in orders)
-    avg_discount_pct = (discount_total / subtotal * 100) if subtotal else 0.0
+    avg_discount_pct = (
+        round(discount_total / subtotal * 100, 1)
+        if subtotal and _discounts_supported(src)
+        else None
+    )
 
     # --- Seating KPIs (dine-in only) — need physical capacity ---
     num_days = (end - start).total_seconds() / 86400.0
@@ -159,7 +176,7 @@ def kpi_window(src, start: datetime, end: datetime, branch_id: str | None = None
         "covers":             covers,
         "customers":          unique_customers,
         "avg_order_value":    round(aov, 2),
-        "avg_discount_pct":   round(avg_discount_pct, 1),
+        "avg_discount_pct":   avg_discount_pct,
         "table_turnover":     table_turnover,
         "revpash":            revpash,
         "cart_abandonment_pct": cart_abandonment_pct,
@@ -237,6 +254,33 @@ def menu_performance(src, days: int = 30) -> List[Dict]:
     return out
 
 
+def menu_rankings(src, days: int = 30, limit: int = 5) -> Dict:
+    """Best/worst menu performers as DISJOINT lists.
+
+    The two lists must never share an item. Slicing perf[:5] and perf[-5:]
+    independently only stays disjoint while the catalog has 10+ items; Square
+    returns 6, so four dishes landed in BOTH "Most Profitable" and
+    "Underperforming" with identical numbers. The same overlap fed the AI via
+    top_menu_30d / bottom_menu_30d, letting it call one dish a best-seller and
+    an underperformer in the same answer.
+
+    Each list is capped at half the catalog, so they stay disjoint at any
+    catalog size; with an odd count the middle item belongs to neither, which
+    is correct — it is neither a top nor a bottom performer. A catalog of 0 or
+    1 items yields two empty lists: nothing there can be ranked against
+    anything.
+
+    Returns {all, top, bottom}; `all` is the full ranking (revenue desc).
+    """
+    perf = menu_performance(src, days)
+    k = min(limit, len(perf) // 2)
+    return {
+        "all": perf,
+        "top": perf[:k],
+        "bottom": perf[len(perf) - k:] if k else [],
+    }
+
+
 def customer_intelligence(src) -> Dict:
     customers = src.customers()
     vip = [c for c in customers if "vip" in c["tags"]]
@@ -300,41 +344,131 @@ def forecast(src, days_ahead: int = 30) -> Dict:
     }
 
 
+# A concrete lever per component, surfaced by "3 steps to improve your score".
+# Phrased as an instruction the owner can act on today — never a fabricated
+# projection of what it's worth.
+_HEALTH_ACTIONS = {
+    "revenue_growth":
+        "Run a promo in your slowest daypart — see Promotions for a combo.",
+    "repeat_customers":
+        "Message at-risk regulars from Marketing AI before they lapse.",
+    "reviews":
+        "Ask happy guests for a review at checkout.",
+    "wait_times":
+        "Add prep capacity in your peak hour — check Operations for the spike.",
+    "tips":
+        "Enable tip prompts on the POS checkout screen.",
+    "staff_efficiency":
+        "Re-stagger shifts so cover peaks match your busiest hours.",
+}
+
+# Why a component can't be scored on the active source. Shown instead of a
+# number so a structural constant never reads as a measurement.
+_HEALTH_UNMEASURABLE = {
+    "reviews": "No review/rating source connected — Square returns no ratings.",
+    "wait_times": "This source records no order wait times.",
+    "tips": "This source records no tips.",
+    "staff_efficiency": "Needs order wait times, which this source doesn't record.",
+}
+
+
+def _ratings_supported(src) -> bool:
+    """True when any order carries a real rating (mock does; Square doesn't)."""
+    return any(o.get("rating") for o in _orders(src))
+
+
+def _waits_supported(src) -> bool:
+    """True when any order carries a real wait time (mock does; Square doesn't)."""
+    return any(o.get("wait_minutes") for o in _orders(src))
+
+
+def _tips_supported(src) -> bool:
+    """True when any order carries a tip (Square sandbox records none)."""
+    return any(o.get("tip") for o in _orders(src))
+
+
 def health_score(src) -> Dict:
-    """0–100 score with component breakdown — feeds the Apple-watch ring."""
-    # Revenue growth (7d vs prior 7d)
+    """0–100 score with component breakdown — feeds the Apple-watch ring.
+
+    Only components the ACTIVE source can actually measure are scored; the rest
+    are None and excluded from the average. This matters: Square exposes no
+    ratings, wait times or tips, and _map_order hardcodes rating=0 and
+    wait_minutes=0. Scored naively that produced reviews=0, tips=0,
+    wait_times=100 and staff_efficiency=100 — four structural constants, not
+    measurements — and the headline score was their average with the two real
+    signals, landing at a meaningless 51 ("red") because the fakes cancelled out.
+
+    `components` keeps every key (None where unmeasurable) so the UI can show
+    "—"; `unavailable` explains each one; `measured` lists what the score is
+    actually built from.
+    """
     end = _today() + timedelta(days=1)
+
+    # --- Revenue growth: 7d vs prior 7d. Always measurable from orders. ---
     cur = kpi_window(src, end - timedelta(days=7), end)
     prev = kpi_window(src, end - timedelta(days=14), end - timedelta(days=7))
     growth = 0.0 if not prev["revenue"] else (cur["revenue"] - prev["revenue"]) / prev["revenue"] * 100
 
-    ci = customer_intelligence(src)
-    repeat = ci["repeat_rate_pct"]
+    # --- Repeat customers: real cohort data. ---
+    repeat = customer_intelligence(src)["repeat_rate_pct"]
 
-    # Avg rating last 30d
-    end30 = _today() + timedelta(days=1)
-    last30 = orders_between(src, end30 - timedelta(days=30), end30)
-    avg_rating = sum(o["rating"] for o in last30) / max(len(last30), 1)
-    avg_wait = sum(o["wait_minutes"] for o in last30) / max(len(last30), 1)
+    last30 = orders_between(src, end - timedelta(days=30), end)
+    n = max(len(last30), 1)
+    avg_rating = sum(o["rating"] for o in last30) / n
+    avg_wait = sum(o["wait_minutes"] for o in last30) / n
+    subtotal30 = sum(o["subtotal"] for o in last30)
+    tip_pct = (sum(o["tip"] for o in last30) / subtotal30 * 100) if subtotal30 else 0.0
 
-    # Tip percentage (proxy for staff service quality)
-    tip_pct = (sum(o["tip"] for o in last30) / sum(o["subtotal"] for o in last30) * 100) if last30 else 0.0
+    def clamp(v: float) -> float:
+        return max(0.0, min(100.0, v))
 
-    components = {
-        "revenue_growth": max(0, min(100, 50 + growth * 4)),     # +12% -> 98
-        "repeat_customers": max(0, min(100, repeat * 1.5)),
-        "reviews": max(0, min(100, (avg_rating - 3) * 50 + 50)),  # 4.5 -> 75
-        "wait_times": max(0, min(100, 100 - max(0, avg_wait - 8) * 6)),
-        "tips": max(0, min(100, tip_pct * 5)),                   # 18% -> 90
-        "staff_efficiency": max(0, min(100, 100 - max(0, avg_wait - 10) * 5)),
+    components: Dict[str, float | None] = {
+        "revenue_growth": clamp(50 + growth * 4),          # +12% -> 98
+        # NOTE: saturates at a 66.7% repeat rate (x1.5 -> 100). A genuinely
+        # excellent rate, but the ceiling hides headroom above it.
+        "repeat_customers": clamp(repeat * 1.5),
+        "reviews": clamp((avg_rating - 3) * 50 + 50) if _ratings_supported(src) else None,
+        "wait_times": clamp(100 - max(0.0, avg_wait - 8) * 6) if _waits_supported(src) else None,
+        "tips": clamp(tip_pct * 5) if _tips_supported(src) else None,
+        "staff_efficiency": (
+            clamp(100 - max(0.0, avg_wait - 10) * 5) if _waits_supported(src) else None
+        ),
     }
-    score = round(sum(components.values()) / len(components))
-    state = "green" if score >= 75 else "yellow" if score >= 55 else "red"
+
+    measured = {k: v for k, v in components.items() if v is not None}
+    score = round(sum(measured.values()) / len(measured)) if measured else None
+    state = (
+        None if score is None
+        else "green" if score >= 75 else "yellow" if score >= 55 else "red"
+    )
     return {
         "score": score,
         "state": state,
-        "components": {k: round(v) for k, v in components.items()},
+        "components": {k: (round(v) if v is not None else None)
+                       for k, v in components.items()},
+        # Only what the score is actually built from.
+        "measured": sorted(measured),
+        "unavailable": {k: _HEALTH_UNMEASURABLE[k]
+                        for k in components if components[k] is None},
+        "steps": health_steps(components),
     }
+
+
+def health_steps(components: Dict[str, float | None], limit: int = 3) -> List[Dict]:
+    """The lowest MEASURED components that still have headroom, worst first.
+
+    Unmeasurable components are skipped entirely — "improve your reviews" is
+    not an actionable step when no review data exists to move. Components
+    already at 100 are skipped too: there is nothing left to improve. So this
+    can return fewer than `limit` steps, or none at all, and that is a truthful
+    answer rather than padding the list.
+    """
+    real = [(k, v) for k, v in components.items() if v is not None and v < 100]
+    real.sort(key=lambda kv: kv[1])
+    return [
+        {"metric": k, "score": round(v), "action": _HEALTH_ACTIONS[k]}
+        for k, v in real[:limit]
+    ]
 
 
 def daily_briefing(src) -> Dict:
@@ -441,6 +575,162 @@ _REVIEW_SENTIMENT_UNAVAILABLE = {
     "signal": "review_sentiment", "status": "insufficient_data",
     "note": "No review/sentiment source connected (Square returns no ratings). "
             "Order `rating` exists in mock only — wire a reviews source to enable."}
+_DISCOUNT_UNAVAILABLE = {
+    "signal": "discount_overuse", "status": "insufficient_data",
+    "note": "This source records no discounts on orders (Square returns none), so "
+            "discount overuse cannot be measured — a 0% average here would be a "
+            "structural zero, not a finding."}
+
+
+_PAYMENT_BUCKETS = ("card", "cash", "other")
+
+
+def _order_payment(o: Dict) -> str | None:
+    """The order's payment bucket, or None when the source recorded none."""
+    m = (o.get("payment_method") or "").strip().lower()
+    return m if m in _PAYMENT_BUCKETS else None
+
+
+def _item_revenue(o: Dict, item_name: str) -> float:
+    """Revenue from `item_name`'s line items inside one order (case-insensitive)."""
+    want = item_name.strip().lower()
+    return round(sum(li.get("price", 0) * li.get("qty", 0) for li in o.get("items", [])
+                     if (li.get("name") or "").strip().lower() == want), 2)
+
+
+def payment_breakdown(src, days: int = 30, item_name: str | None = None,
+                      start: datetime | None = None, end: datetime | None = None,
+                      label: str | None = None) -> Dict:
+    """Card/cash/other split on a REVENUE basis — dollars AND percent.
+
+    Scope:
+      * item_name=None -> whole-order revenue (order totals).
+      * item_name set  -> only that item's line revenue, attributed to the
+                          payment method of the order it sold in.
+
+    Orders carrying no payment method (no tender — an OPEN Square order, or any
+    source that doesn't record payments) land in `untracked_orders` and are
+    EXCLUDED from the split; they are never silently bucketed as "other". When
+    `tracked_orders` is 0 the split is empty and `note` says so, so the AI has
+    nothing to fabricate a percentage from.
+
+    Percentages are shares of TRACKED revenue only, so revenue_pct sums to 100
+    across the three buckets (or all-zero when nothing is tracked).
+    """
+    if end is None:
+        end = _today() + timedelta(days=1)
+    if start is None:
+        start = end - timedelta(days=days)
+
+    rev = {b: 0.0 for b in _PAYMENT_BUCKETS}
+    cnt = {b: 0 for b in _PAYMENT_BUCKETS}
+    tracked = untracked = 0
+
+    for o in orders_between(src, start, end):
+        amount = _item_revenue(o, item_name) if item_name else o.get("total", 0)
+        if item_name and amount <= 0:
+            continue                      # this order didn't contain the item
+        bucket = _order_payment(o)
+        if bucket is None:
+            untracked += 1
+            continue
+        tracked += 1
+        rev[bucket] += amount
+        cnt[bucket] += 1
+
+    total = round(sum(rev.values()), 2)
+    return {
+        "window": label or f"last {days} days",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "item": item_name,
+        "basis": "revenue",               # dollars, not order counts
+        "tracked_orders": tracked,
+        "untracked_orders": untracked,
+        "tracked_revenue": total,
+        "by_method": [
+            {
+                "method": b,
+                "revenue": round(rev[b], 2),
+                "revenue_pct": round(rev[b] / total * 100, 1) if total else 0.0,
+                "orders": cnt[b],
+            }
+            for b in _PAYMENT_BUCKETS
+        ],
+        "note": (
+            "no payment method recorded on this source"
+            if tracked == 0 else None
+        ),
+    }
+
+
+def monthly_profit_loss(src, branch_id: str | None = None) -> Dict:
+    """ESTIMATED gross profit for the current calendar month, month-to-date.
+
+    profit = gross sales - estimated cost of goods - discounts
+
+    Revenue basis is line items (sum of price x qty), NOT order subtotal. The
+    two sources disagree on what `subtotal` means: mock's is pre-discount
+    (total = subtotal - discount + tax + tip) while Square's is derived as
+    total - tax - tip and Square's total is already net of discounts. Summing
+    line items is pre-discount on both, so subtracting `discount` here stays
+    correct on either source instead of double-counting on Square. Tax and tips
+    are excluded — neither is the restaurant's money.
+
+    THIS IS AN ESTIMATE, NOT BOOKKEEPING. Cost of goods comes from
+    data_source._estimate_cost(), a flat share of menu price (32% food / 22%
+    beverage) — there are no supplier invoices in any data source. It is also
+    GROSS profit only: labour, rent, utilities and every other operating cost
+    are absent, so the real bottom line is materially lower. `is_estimate`,
+    `excludes` and `caveat` carry that to the AI so it can't be quoted as fact.
+    """
+    start = _today().replace(day=1)
+    end = _today() + timedelta(days=1)
+    orders = orders_between(src, start, end, branch_id)
+
+    gross_sales = sum(li.get("price", 0) * li.get("qty", 0)
+                      for o in orders for li in o.get("items", []))
+    cogs = sum(li.get("cost", 0) * li.get("qty", 0)
+               for o in orders for li in o.get("items", []))
+    discounts = sum(o.get("discount", 0) for o in orders)
+    profit = gross_sales - cogs - discounts
+
+    return {
+        "month": start.strftime("%Y-%m"),
+        "window": f"{start.date()} to {(end - timedelta(days=1)).date()} (month-to-date)",
+        "days_elapsed": (end - start).days,
+        "orders": len(orders),
+        "gross_sales": round(gross_sales, 2),
+        "cogs_estimated": round(cogs, 2),
+        "discounts": round(discounts, 2),
+        "gross_profit_estimated": round(profit, 2),
+        "gross_margin_pct": round(profit / gross_sales * 100, 1) if gross_sales else 0.0,
+        "is_estimate": True,
+        "cogs_method": "flat share of menu price (32% food / 22% beverage) — no supplier invoices exist",
+        "excludes": ["labour", "rent", "utilities", "marketing spend",
+                     "equipment", "taxes", "tips (staff money)"],
+        "caveat": ("Estimated GROSS profit, not bookkeeping. Cost of goods is modelled "
+                   "as a flat share of menu price, not real invoices, and labour/rent/"
+                   "overhead are excluded — true net profit is lower."),
+        # Square records no discounts, so the discount term is structurally $0
+        # there; flag it rather than let $0.00 read as "nobody used a promo".
+        "discounts_tracked": any(o.get("discount") for o in orders),
+    }
+
+
+def payment_context(src) -> Dict:
+    """30-day plus day-scoped payment splits for the AI context."""
+    d0 = _today()
+    return {
+        "payments_30d": payment_breakdown(src, 30, label="last 30 days"),
+        "payments_today": payment_breakdown(
+            src, start=d0, end=d0 + timedelta(days=1), label="today"),
+        "payments_yesterday": payment_breakdown(
+            src, start=d0 - timedelta(days=1), end=d0, label="yesterday"),
+        "payments_this_week": payment_breakdown(
+            src, start=d0 - timedelta(days=d0.weekday()), end=d0 + timedelta(days=1),
+            label="this week (Mon-today)"),
+    }
 
 
 def _unavailable_signals(src) -> List[Dict]:
@@ -449,6 +739,8 @@ def _unavailable_signals(src) -> List[Dict]:
     out = []
     if not _carts_supported(src):
         out.append(_CART_ABANDONMENT_UNAVAILABLE)
+    if not _discounts_supported(src):
+        out.append(_DISCOUNT_UNAVAILABLE)
     out.append(_REVIEW_SENTIMENT_UNAVAILABLE)
     return out
 
@@ -630,10 +922,16 @@ def score_causes(src, checkpoint_hour: int | None = None,
         {"signal": "repeat_customer", "today_value": round(r_today * 100, 1),
          "baseline_value": round(r_base * 100, 1), "delta_pct": round(r_delta, 1),
          "contribution_pct": None, "noisy": bool(r_noisy)},   # leading indicator
-        {"signal": "discount_overuse", "today_value": round(d_today * 100, 1),
-         "baseline_value": round(d_base * 100, 1), "delta_pct": round(d_delta, 1),
-         "contribution_pct": _contrib(disc_loss)},
     ]
+    # Only rank discount-overuse where discounts are actually recorded. On a
+    # source that carries none (Square), today and baseline are both a structural
+    # 0.0% and "Avg discount 0.0% vs 0.0% baseline" would read as a measurement
+    # that had been taken. It goes to unavailable_signals instead.
+    if _discounts_supported(src):
+        signals.append(
+            {"signal": "discount_overuse", "today_value": round(d_today * 100, 1),
+             "baseline_value": round(d_base * 100, 1), "delta_pct": round(d_delta, 1),
+             "contribution_pct": _contrib(disc_loss)})
     for s in signals:
         s["weight"] = CAUSE_WEIGHTS[s["signal"]]
         s["adverse"] = _ADVERSE[s["signal"]]
@@ -688,10 +986,101 @@ def revenue_diagnosis(src, checkpoint_hour: int | None = None,
     }
 
 
+def _segment_customer_ids(src, audience: str) -> set:
+    """Customer ids in a segment, using the same vip/at_risk/new tags the
+    broadcast targeted. "all" is every customer."""
+    seg = (audience or "all").strip().lower()
+    cs = _customers(src)
+    if seg in ("", "all"):
+        return {c["id"] for c in cs if c.get("id")}
+    return {c["id"] for c in cs if seg in (c.get("tags") or []) and c.get("id")}
+
+
+def _synthetic_dates(src) -> bool:
+    """True when the active source fabricates order timestamps (Square demo
+    date-spreading). Any before/after comparison over those dates is arithmetic
+    on invented history, so the ROI screen must say so."""
+    return bool(getattr(src, "demo_spread_days", 0))
+
+
+def campaign_roi(src, sent_at: datetime, audience: str, window_days: int = 7) -> Dict:
+    """That segment's orders/revenue in the `window_days` AFTER a send vs before.
+
+    Same shape of baseline as revenue_diagnosis: compare a window against a
+    matched earlier window rather than against a single adjacent day. Here the
+    matched window is the equal-length stretch immediately before the send, and
+    it is scoped to the customers the campaign actually targeted — a store-wide
+    lift tells you nothing about whether the broadcast worked.
+
+    Returns status="still_measuring" until the full after-window has elapsed.
+    A partial window would read as a real result while mechanically being a
+    smaller number than the before-window it's compared against, i.e. an
+    invented decline. Better to show nothing.
+
+    THIS IS NOT ATTRIBUTION. It cannot tell a campaign-driven order from a
+    coincidence, a weekend, or the weather. Nothing here tracks redemptions.
+    """
+    now = datetime.now(timezone.utc)
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    after_end = sent_at + timedelta(days=window_days)
+    before_start = sent_at - timedelta(days=window_days)
+
+    base = {
+        "audience": audience,
+        "window_days": window_days,
+        "sent_at": sent_at.isoformat(),
+        "window_closes": after_end.isoformat(),
+        "synthetic_dates": _synthetic_dates(src),
+    }
+
+    if now < after_end:
+        remaining = (after_end - now).total_seconds() / 86400.0
+        return {
+            **base,
+            "status": "still_measuring",
+            "days_remaining": max(1, int(remaining + 0.999)),  # round up; never 0
+        }
+
+    ids = _segment_customer_ids(src, audience)
+    if not ids:
+        return {**base, "status": "no_segment",
+                "note": f"No customers currently carry the '{audience}' tag."}
+
+    def _window(start: datetime, end: datetime) -> Dict:
+        os_ = [o for o in orders_between(src, start, end)
+               if o.get("customer_id") in ids]
+        return {
+            "orders": len(os_),
+            "revenue": round(sum(o.get("total", 0) for o in os_), 2),
+            "customers": len({o["customer_id"] for o in os_ if o.get("customer_id")}),
+        }
+
+    before = _window(before_start, sent_at)
+    after = _window(sent_at, after_end)
+
+    def _delta(a: float, b: float):
+        # None, not 0, when there's no baseline to compare against: "+100%" off
+        # a zero base is meaningless.
+        return None if not b else round((a - b) / b * 100, 1)
+
+    return {
+        **base,
+        "status": "measured",
+        "segment_size": len(ids),
+        "before": before,
+        "after": after,
+        "revenue_delta_pct": _delta(after["revenue"], before["revenue"]),
+        "orders_delta_pct": _delta(after["orders"], before["orders"]),
+        "revenue_change": round(after["revenue"] - before["revenue"], 2),
+    }
+
+
 def restaurant_context(src) -> Dict:
     """Compact, structured snapshot injected into the AI system prompt."""
     today = today_kpis(src)
     rb = revenue_breakdown(src, 30)
+    menu_rank = menu_rankings(src, 30)
     return {
         "today": today,
         "health": health_score(src),
@@ -703,8 +1092,11 @@ def restaurant_context(src) -> Dict:
             "by_day_14d": rb["by_day"][-14:],     # last 14 days of daily revenue
         },
         "branches_7d": branch_performance(src, 7),
-        "top_menu_30d": menu_performance(src, 30)[:5],
-        "bottom_menu_30d": menu_performance(src, 30)[-3:],
+        # Disjoint by construction — see menu_rankings(). Slicing [:5] and [-3:]
+        # off a 6-item catalog put the same dish in both lists, letting the AI
+        # call one item a best-seller and an underperformer in one answer.
+        "top_menu_30d": menu_rank["top"],
+        "bottom_menu_30d": menu_rank["bottom"],
         "customers": {k: v for k, v in customer_intelligence(src).items()
                       if k not in ("top_vips", "at_risk_list")},
         "operations": operations_snapshot(src),
@@ -714,4 +1106,11 @@ def restaurant_context(src) -> Dict:
         # Baseline-driven (same weekday, last 4 weeks) with ranked causes. Only
         # traffic & repeat-customer are data-backed; the rest say insufficient_data.
         "revenue_diagnosis": revenue_diagnosis(src),
+        # Card/cash/other splits on a revenue basis (dollars + %), 30-day plus
+        # today/yesterday/this-week windows so scoped questions don't get a
+        # 30-day number. tracked_orders=0 means the source records no payments.
+        **payment_context(src),
+        # Month-to-date ESTIMATED gross profit. Modelled COGS, no overheads —
+        # is_estimate/excludes/caveat exist so it's never quoted as bookkeeping.
+        "profit_mtd": monthly_profit_loss(src),
     }

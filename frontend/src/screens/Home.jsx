@@ -226,20 +226,66 @@ export default function Home() {
                         {data.health.state}
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 text-center text-[11px]">
-                        {Object.entries(data.health.components).map(([k, v]) => (
-                            <div
-                                key={k}
-                                className="rounded-md bg-slate-50 px-2 py-1.5"
-                            >
-                                <div className="text-slate-400">
-                                    {k.replace(/_/g, " ")}
+                        {Object.entries(data.health.components).map(([k, v]) => {
+                            // null => the active source can't measure it. Show "—"
+                            // and why, never a 0 or 100 that reads as a real score.
+                            const why = data.health.unavailable?.[k];
+                            return (
+                                <div
+                                    key={k}
+                                    title={why || undefined}
+                                    className="rounded-md bg-slate-50 px-2 py-1.5"
+                                >
+                                    <div className="text-slate-400">
+                                        {k.replace(/_/g, " ")}
+                                    </div>
+                                    <div
+                                        className={`font-mono text-sm font-semibold ${
+                                            v === null ? "text-slate-300" : "text-slate-900"
+                                        }`}
+                                    >
+                                        {v === null ? "—" : v}
+                                    </div>
                                 </div>
-                                <div className="font-mono text-sm font-semibold text-slate-900">
-                                    {v}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
+
+                    {data.health.unavailable &&
+                        Object.keys(data.health.unavailable).length > 0 && (
+                            <p className="w-full text-[10px] leading-relaxed text-slate-400">
+                                Score uses the{" "}
+                                {data.health.measured?.length} metric
+                                {data.health.measured?.length === 1 ? "" : "s"} this
+                                source can measure. “—” means no data exists for it —
+                                hover to see why.
+                            </p>
+                        )}
+
+                    {data.health.steps?.length > 0 && (
+                        <div className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                {data.health.steps.length} step
+                                {data.health.steps.length === 1 ? "" : "s"} to improve your
+                                health score
+                            </div>
+                            <ol className="mt-2 space-y-2">
+                                {data.health.steps.map((s, i) => (
+                                    <li key={s.metric} className="flex gap-2">
+                                        <span className="mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#FF6B35] text-[9px] font-bold text-white">
+                                            {i + 1}
+                                        </span>
+                                        <span className="text-[11px] leading-snug text-slate-600">
+                                            <b className="text-slate-800">
+                                                {s.metric.replace(/_/g, " ")} ({s.score})
+                                            </b>{" "}
+                                            — {s.action}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -257,7 +303,7 @@ export default function Home() {
                     change={t.vs_yesterday_pct}
                     money
                     icon={<DollarSign size={16} className="text-slate-300" />}
-                    sublabel="vs. yesterday"
+                    sublabel="vs. yesterday · 14-day trend"
                 />
                 <KpiTile
                     testId={TID.kpiCovers}

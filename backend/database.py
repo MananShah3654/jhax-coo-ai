@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint,
-    create_engine, func, text,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text,
+    UniqueConstraint, create_engine, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
@@ -385,6 +385,56 @@ class Shift(Base):
         }
 
 
+class SentCampaign(Base):
+    """One broadcast the owner actually approved and we actually attempted.
+
+    Written ONLY after a real send attempt, never on preview — the Campaign ROI
+    screen reads this table as the record of what went out, so a row here must
+    mean a message left the building (or genuinely failed trying). `sent_at` is
+    the pivot for ROI's before/after windows, and `audience` scopes which
+    customers to measure.
+
+    The table already existed in Postgres (empty, and created by no commit in
+    this repo — an orphan of work that was lost). These columns match that
+    schema rather than replacing it; `status` is the only addition and is
+    ALTERed in idempotently by init_db().
+    """
+
+    __tablename__ = "sent_campaigns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    audience: Mapped[str] = mapped_column(String(32), index=True)   # vip/at_risk/new/all
+    channel: Mapped[str] = mapped_column(String(32))                # "whatsapp"
+    goal: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text)
+    banner_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recipient_count: Mapped[int] = mapped_column(default=0)  # targeted after dedupe
+    sent_count: Mapped[int] = mapped_column(default=0)       # accepted by WhatsApp
+    failed_count: Mapped[int] = mapped_column(default=0)     # rejected/errored
+    # sent | partial | failed — never "sent" unless WhatsApp accepted at least one.
+    status: Mapped[str] = mapped_column(String(16), default="failed")
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "audience": self.audience,
+            "channel": self.channel,
+            "goal": self.goal,
+            "subject": self.subject,
+            "message": self.message,
+            "banner_url": self.banner_url,
+            "recipient_count": self.recipient_count,
+            "sent_count": self.sent_count,
+            "failed_count": self.failed_count,
+            "status": self.status,
+            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+        }
+
+
 def init_db() -> None:
     """Create all tables if they don't exist (idempotent).
 
@@ -414,6 +464,8 @@ def init_db() -> None:
             "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS meal_taken BOOLEAN DEFAULT FALSE",
             "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS late_clockin BOOLEAN DEFAULT FALSE",
             "ALTER TABLE labor_shifts ADD COLUMN IF NOT EXISTS missed_clockin BOOLEAN DEFAULT FALSE",
+            # sent_campaigns predates its model and lacked `status`.
+            "ALTER TABLE sent_campaigns ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'failed'",
         ):
             conn.execute(text(ddl))
 

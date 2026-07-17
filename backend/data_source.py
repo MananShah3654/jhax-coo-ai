@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -205,9 +206,14 @@ _SQUARE_VERSION = "2024-10-17"
 #   1. SQUARE_SEAT_CAPACITY env (JSON) keyed by location id OR name (case-insensitive)
 #   2. _SQUARE_DEFAULT_CAPACITY (tunable via SQUARE_DEFAULT_SEATS/_TABLES)
 # Example: SQUARE_SEAT_CAPACITY='{"LA8VJR69N9V6E": {"seats": 64, "tables": 16}}'
-_SQUARE_DEFAULT_CAPACITY = {
-    "seats": int(os.environ.get("SQUARE_DEFAULT_SEATS", "64") or 64),
-    "tables": int(os.environ.get("SQUARE_DEFAULT_TABLES", "16") or 16),
+# Only a capacity the operator explicitly declared counts. Absent the env vars
+# this stays empty, so seats/tables resolve to 0 and the seating KPIs degrade to
+# "—" rather than inventing a denominator.
+_SQUARE_DECLARED_DEFAULT = {
+    k: int(v) for k, v in (
+        ("seats", os.environ.get("SQUARE_DEFAULT_SEATS")),
+        ("tables", os.environ.get("SQUARE_DEFAULT_TABLES")),
+    ) if v
 }
 
 
@@ -228,11 +234,20 @@ _SQUARE_CAPACITY = _load_square_capacity()
 
 
 def _square_capacity(loc_id: str | None, name: str | None) -> Dict[str, int]:
-    """Seats/tables for a Square location, matched by id then name, else default."""
+    """Seats/tables for a Square location, matched by id then name.
+
+    Returns zeros when the operator has NOT declared a capacity for this
+    location. Square exposes no seating data, so the fallback default is an
+    assumption, not a measurement — feeding it to Table Turnover / RevPASH
+    produces numbers that look measured but rest on an invented denominator.
+    Zeros make analytics report those KPIs as None ("—") instead. Declare real
+    seating via SQUARE_SEAT_CAPACITY (or SQUARE_DEFAULT_SEATS/_TABLES) to opt in
+    with numbers you can vouch for.
+    """
     cap = (
         _SQUARE_CAPACITY.get((loc_id or "").lower())
         or _SQUARE_CAPACITY.get((name or "").lower())
-        or _SQUARE_DEFAULT_CAPACITY
+        or _SQUARE_DECLARED_DEFAULT      # {} unless explicitly configured
     )
     return {"seats": int(cap.get("seats") or 0), "tables": int(cap.get("tables") or 0)}
 
@@ -303,6 +318,58 @@ class SquareDataSource:
             logger.warning("Square fallback %s %s: %s", method, path, exc)
             return None
 
+    def push_discount(self, *, name: str, percentage: float,
+                      idempotency_key: str) -> Dict:
+        """Create a DISCOUNT catalog object in Square. Returns the RAW result.
+
+        Deliberately NOT routed through _request(): that logs and returns None
+        so a failed read can fall back to mock. For a write that would be
+        dangerous — None is indistinguishable from success at the call site, and
+        the UI would report a promotion pushed to a POS that never received it.
+        Here every outcome is reported as Square actually returned it.
+
+        Returns {ok, status, response, error} where `response` is Square's
+        verbatim JSON body (including its `errors` array on failure).
+        """
+        if not self.token:
+            return {"ok": False, "status": None, "response": None,
+                    "error": "SQUARE_ACCESS_TOKEN is not configured"}
+        # Square wants percentage as a string, max 5 dp, no % sign.
+        body = {
+            "idempotency_key": idempotency_key,
+            "object": {
+                "type": "DISCOUNT",
+                # "#name" is Square's temporary client-side id for a new object;
+                # it returns the permanent id in the response.
+                "id": "#" + re.sub(r"[^A-Za-z0-9_-]", "-", name)[:40] or "#promo",
+                "discount_data": {
+                    "name": name[:255],
+                    "discount_type": "FIXED_PERCENTAGE",
+                    "percentage": f"{float(percentage):.2f}",
+                },
+            },
+        }
+        try:
+            with httpx.Client(timeout=20.0, headers=self._headers()) as c:
+                r = c.post(f"{self.base}/v2/catalog/object", json=body)
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {"raw_text": r.text[:800]}
+            if r.status_code >= 400:
+                errs = payload.get("errors") if isinstance(payload, dict) else None
+                detail = "; ".join(
+                    f"{e.get('code')}: {e.get('detail')}" for e in (errs or [])
+                ) or f"Square returned HTTP {r.status_code}"
+                return {"ok": False, "status": r.status_code,
+                        "response": payload, "error": detail}
+            return {"ok": True, "status": r.status_code,
+                    "response": payload, "error": None}
+        except Exception as exc:
+            # Network/timeout: report it, never dress it up as success.
+            return {"ok": False, "status": None, "response": None,
+                    "error": f"{type(exc).__name__}: {exc}"}
+
     # --- mappers (Square shape -> internal shape) ---
     @staticmethod
     def _map_location(loc: Dict) -> Dict:
@@ -315,8 +382,9 @@ class SquareDataSource:
             "name": name,
             "city": addr.get("locality") or "",
             "manager": "",
-            # Static dining capacity (Square can't report it) so Table Turnover
-            # and RevPASH compute on live Square. See _square_capacity.
+            # Square reports no dining capacity. Zeros unless the operator
+            # declared it, which makes Table Turnover / RevPASH degrade to "—"
+            # rather than compute off an assumed denominator. See _square_capacity.
             "seats": cap["seats"],
             "tables": cap["tables"],
         }
@@ -352,6 +420,26 @@ class SquareDataSource:
             "price": price,
             "cost": _estimate_cost(price, category),
         }
+
+    # Square tender types -> the three buckets analytics reports. Anything that
+    # isn't a plain card or cash tender (gift card, wallet, BNPL, external)
+    # rolls into "other" rather than inventing further categories.
+    _TENDER_BUCKETS = {"CARD": "card", "CASH": "cash"}
+
+    @staticmethod
+    def _payment_method(o: Dict) -> str | None:
+        """card / cash / other from Square's tenders — None when untendered.
+
+        None (not "other") is deliberate: an OPEN/unpaid order has no payment
+        method *yet*, which is different from having been paid by some other
+        means. Analytics counts these as untracked instead of guessing.
+        """
+        tenders = o.get("tenders") or []
+        if not tenders:
+            return None
+        # Square permits split tenders; attribute the order to the largest.
+        top = max(tenders, key=lambda t: (t.get("amount_money") or {}).get("amount", 0))
+        return SquareDataSource._TENDER_BUCKETS.get((top.get("type") or "").upper(), "other")
 
     @staticmethod
     def _map_order(o: Dict, var_to_item: Dict[str, str] | None = None) -> Dict:
@@ -391,6 +479,7 @@ class SquareDataSource:
             "tax": tax,
             "tip": tip,
             "total": total,
+            "payment_method": SquareDataSource._payment_method(o),
             "wait_minutes": 0,
             "rating": 0,
         }

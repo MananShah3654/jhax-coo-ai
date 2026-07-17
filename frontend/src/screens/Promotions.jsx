@@ -11,9 +11,10 @@
  */
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Store, CheckCircle2, XCircle, Wand2, Clock, AlertTriangle } from "lucide-react";
 import Layout from "@/components/Layout";
 import { api, fmtUsd } from "@/lib/api";
+import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 
 const PREFILL_KEY = "promotion_prefill";
@@ -50,6 +51,11 @@ export default function Promotions() {
     const [discount, setDiscount] = useState(15);
     const [audience, setAudience] = useState("Lunch crowd");
     const [busy, setBusy] = useState(false);
+    const [pushBusy, setPushBusy] = useState(false);
+    const [pushResult, setPushResult] = useState(null);
+    // AI-suggested combo (from live sales data), shown alongside the manual presets
+    const [aiBusy, setAiBusy] = useState(false);
+    const [aiNote, setAiNote] = useState(null);
 
     // Load menu items for picker
     useEffect(() => {
@@ -97,6 +103,43 @@ export default function Promotions() {
         setItems(p.items);
         setDiscount(p.discount);
         setAudience(p.audience);
+        setAiNote(null);
+    };
+
+    // Build a combo from live sales data (best-sellers + trends) and pour it
+    // into the manual builder, which stays fully editable afterwards.
+    const aiSuggest = async () => {
+        setAiBusy(true);
+        setAiNote(null);
+        try {
+            const { data } = await api.post("/combos/generate", { focus: null });
+            const suggested = (data.items || []).map((i) => i.name).filter(Boolean);
+            // The builder prices items by matching their NAME against the menu,
+            // so a name that isn't on the menu would vanish from the economics
+            // without a trace. Keep only what we can actually price, and say so.
+            const known = suggested.filter((n) => menu.some((m) => m.name === n));
+            const dropped = suggested.filter((n) => !menu.some((m) => m.name === n));
+            if (!known.length) {
+                toast.error("AI suggested items that aren't on your menu");
+                return;
+            }
+            setItems(known);
+            if (data.name) setName(data.name);
+            if (typeof data.savings_pct === "number") {
+                setDiscount(Math.max(1, Math.min(60, Math.round(data.savings_pct))));
+            }
+            if (data.target_daypart) setAudience(data.target_daypart);
+            setAiNote({
+                rationale: data.rationale || "",
+                daypart: data.target_daypart || "",
+                dropped,
+            });
+            toast.success("Combo built from your sales data");
+        } catch {
+            toast.error("Couldn't reach the AI combo builder");
+        } finally {
+            setAiBusy(false);
+        }
     };
 
     const launch = async () => {
@@ -116,6 +159,37 @@ export default function Promotions() {
         }
     };
 
+    // Push the combo's discount to the live Square catalog. Every outcome here
+    // is Square's own — on failure we surface its error text verbatim rather
+    // than a generic "failed", and never claim success it didn't report.
+    const pushToSquare = async () => {
+        setPushBusy(true);
+        setPushResult(null);
+        try {
+            const { data } = await api.post("/promotions/square-push", {
+                name,
+                discount,
+                items,
+            });
+            setPushResult(data);
+            if (data.ok) {
+                toast.success(`Live in Square · ${data.catalog_object_id}`);
+            } else {
+                toast.error(data.error || "Square rejected the promotion");
+            }
+        } catch (e) {
+            const detail =
+                e?.response?.data?.detail ||
+                e?.response?.data?.error ||
+                e?.message ||
+                "Request failed";
+            setPushResult({ ok: false, error: detail, square_response: null });
+            toast.error(detail);
+        } finally {
+            setPushBusy(false);
+        }
+    };
+
     return (
         <Layout>
             <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">
@@ -125,7 +199,23 @@ export default function Promotions() {
                 Design a combo in 30 seconds
             </h1>
 
-            <div className="mt-2 flex flex-wrap gap-2">
+            {/* AI suggestion sits alongside the hand-made presets — both fill the
+                same builder, and everything stays editable afterwards. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                    data-testid={TID.promoAiSuggest}
+                    onClick={aiSuggest}
+                    disabled={aiBusy || menu.length === 0}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                    {aiBusy ? (
+                        <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                        <Wand2 size={12} />
+                    )}
+                    {aiBusy ? "Reading your sales…" : "Generate from sales data"}
+                </button>
+                <span className="text-[11px] text-slate-400">or start from a preset:</span>
                 {PRESETS.map((p) => (
                     <button
                         key={p.id}
@@ -137,6 +227,53 @@ export default function Promotions() {
                     </button>
                 ))}
             </div>
+
+            {/* Echoes the Home briefing card's treatment — warm gradient, soft
+                orb, orange eyebrow — because this is the same thing: the AI
+                telling the owner something it worked out from their data. */}
+            {aiNote && (
+                <div
+                    data-testid={TID.promoAiNote}
+                    className="fade-up relative mt-4 overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white via-white to-orange-50/50 p-4 shadow-[0_2px_12px_rgba(15,23,42,0.04)]"
+                >
+                    <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-orange-100/50 blur-2xl" />
+
+                    <div className="relative flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.25em] text-[#FF6B35]">
+                            <Wand2 size={12} />
+                            Built from your last 30 days
+                        </div>
+                        {/* Daypart is data, so it reads as a value, not a sentence. */}
+                        {aiNote.daypart && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-orange-100 bg-white/70 px-2.5 py-0.5 text-[10px] font-semibold text-[#E85D2A]">
+                                <Clock size={10} />
+                                {aiNote.daypart}
+                            </span>
+                        )}
+                    </div>
+
+                    {aiNote.rationale && (
+                        <p className="relative mt-2 text-[13px] leading-relaxed text-slate-700">
+                            {aiNote.rationale}
+                        </p>
+                    )}
+
+                    {aiNote.dropped.length > 0 && (
+                        <div className="relative mt-2.5 flex items-start gap-1.5 rounded-lg bg-amber-50/80 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800">
+                            <AlertTriangle size={12} className="mt-px shrink-0" />
+                            <span>
+                                Skipped <b>{aiNote.dropped.join(", ")}</b> — not on your
+                                menu, so it couldn’t be priced.
+                            </span>
+                        </div>
+                    )}
+
+                    <p className="relative mt-2.5 border-t border-orange-100/70 pt-2 text-[11px] text-slate-400">
+                        Everything below is editable — adjust the items or the discount
+                        before launching.
+                    </p>
+                </div>
+            )}
 
             <div className="mt-6 grid items-start gap-6 lg:grid-cols-[1fr_360px]">
                 {/* Builder */}
@@ -301,6 +438,55 @@ export default function Promotions() {
                         )}
                         Launch Promotion
                     </button>
+
+                    <button
+                        data-testid="promo-push-square"
+                        onClick={pushToSquare}
+                        disabled={pushBusy || items.length === 0}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition-all hover:border-slate-900 hover:text-slate-900 disabled:opacity-50"
+                    >
+                        {pushBusy ? (
+                            <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                            <Store size={14} />
+                        )}
+                        {pushBusy ? "Pushing to Square…" : "Push to Square POS"}
+                    </button>
+                    <p className="mt-2 text-center text-[11px] text-slate-400">
+                        Creates a real discount in your Square catalog.
+                    </p>
+
+                    {/* Square's actual answer — success or failure, verbatim. */}
+                    {pushResult && (
+                        <div
+                            data-testid="promo-push-result"
+                            className={`mt-3 rounded-2xl border p-3 text-xs ${
+                                pushResult.ok
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                    : "border-red-200 bg-red-50 text-red-700"
+                            }`}
+                        >
+                            <div className="flex items-center gap-1.5 font-semibold">
+                                {pushResult.ok ? (
+                                    <>
+                                        <CheckCircle2 size={13} /> Live in Square
+                                    </>
+                                ) : (
+                                    <>
+                                        <XCircle size={13} /> Square rejected it
+                                    </>
+                                )}
+                            </div>
+                            {pushResult.ok ? (
+                                <div className="mt-1 space-y-0.5 font-mono text-[10px]">
+                                    <div>id: {pushResult.catalog_object_id}</div>
+                                    <div>version: {String(pushResult.version)}</div>
+                                </div>
+                            ) : (
+                                <div className="mt-1 break-words">{pushResult.error}</div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </Layout>

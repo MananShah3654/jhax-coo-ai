@@ -37,6 +37,25 @@ export const TID = {
     unlockForgot: "unlock-forgot",
 
     // Layout
+    promoAiSuggest: "promo-ai-suggest",
+    promoAiNote: "promo-ai-note",
+
+    roiTable: "roi-table",
+    roiEmpty: "roi-empty",
+    roiSyntheticWarning: "roi-synthetic-warning",
+    navCampaignRoi: "nav-campaign-roi",
+
+    waSend: "wa-send",
+    waApproval: "wa-approval",
+    waApprove: "wa-approve",
+    waResult: "wa-result",
+    waNotConfigured: "wa-not-configured",
+
+    campCopyWhatsapp: "camp-copy-whatsapp",
+    campCopyCaption: "camp-copy-caption",
+    campDownloadInstagram: "camp-download-instagram",
+    campBannerReady: "camp-banner-ready",
+
     navHome: "nav-home",
     navChat: "nav-chat",
     navBranches: "nav-branches",
@@ -92,8 +111,4 @@ export const TID = {
     campBannerGenerate: "camp-banner-generate",
     campBannerImg: "camp-banner-img",
     campBannerRegenerate: "camp-banner-regenerate",
-    comboGenerate: "combo-generate",
-    comboResult: "combo-result",
-    comboRegenerate: "combo-regenerate",
-    comboLaunch: "combo-launch",
 };

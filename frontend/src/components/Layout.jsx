@@ -11,6 +11,7 @@ import {
     TrendingUp,
     ClipboardList,
     LogOut,
+    LineChart,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Logo from "@/components/Logo";
@@ -24,6 +25,7 @@ const NAV = [
     { to: "/customers", label: "Customers",    Icon: Users,          tid: TID.navCustomers },
     { to: "/menu",      label: "Menu",         Icon: UtensilsCrossed, tid: TID.navMenu },
     { to: "/marketing", label: "Marketing AI", Icon: Megaphone,      tid: TID.navMarketing },
+    { to: "/campaign-roi", label: "Campaign ROI", Icon: LineChart,   tid: TID.navCampaignRoi },
     { to: "/promotions",label: "Promotions",   Icon: Sparkles,       tid: "nav-promotions" },
     { to: "/forecast",  label: "Forecast",     Icon: TrendingUp,     tid: TID.navForecast },
     { to: "/manager",   label: "Manager Mode", Icon: ClipboardList,  tid: TID.navManager },

@@ -99,29 +99,35 @@ export default function CampaignRoi() {
                 Did the campaign move revenue?
             </h1>
 
-            {/* Synthetic-date warning outranks everything else on this screen:
-                without it the numbers below look earned. */}
-            {data.synthetic_dates && (
-                <div
-                    data-testid={TID.roiSyntheticWarning}
-                    className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800"
-                >
-                    <AlertTriangle size={14} className="mt-px shrink-0" />
-                    <span>
-                        <b>These dates are synthetic.</b> The <b>{data.data_source}</b>{" "}
-                        source is running with demo date-spreading
-                        (SQUARE_DEMO_SPREAD_DAYS), which fabricates every order
-                        timestamp because Square can’t backdate orders. Any
-                        before/after window here is arithmetic over invented history —
-                        treat these figures as a UI demonstration, not a result. Set
-                        SQUARE_DEMO_SPREAD_DAYS=0 for real dates.
+            {/* Both caveats stay VISIBLE, just quiet — full text on hover.
+                Deliberately not hover-only: the synthetic-dates note is the only
+                thing stopping a "+0.3%" from reading as a real result, and a
+                tooltip is invisible to a glance or a screenshot. */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] leading-snug">
+                {data.synthetic_dates && (
+                    <span
+                        data-testid={TID.roiSyntheticWarning}
+                        title={
+                            `The ${data.data_source} source is running with demo ` +
+                            "date-spreading (SQUARE_DEMO_SPREAD_DAYS), which fabricates " +
+                            "every order timestamp because Square can't backdate orders. " +
+                            "Any before/after window here is arithmetic over invented " +
+                            "history — treat these figures as a UI demonstration, not a " +
+                            "result. Set SQUARE_DEMO_SPREAD_DAYS=0 for real dates."
+                        }
+                        className="inline-flex cursor-help items-center gap-1 text-amber-600 underline decoration-amber-300 decoration-dotted underline-offset-2"
+                    >
+                        <AlertTriangle size={11} className="shrink-0" />
+                        Dates are synthetic — demo data, not a real result
                     </span>
-                </div>
-            )}
-
-            <div className="mt-3 flex items-start gap-2 rounded-2xl border border-slate-200/70 bg-slate-50/60 p-4 text-xs text-slate-500">
-                <Info size={14} className="mt-px shrink-0 text-slate-400" />
-                <span>{data.disclaimer}</span>
+                )}
+                <span
+                    title={data.disclaimer}
+                    className="inline-flex cursor-help items-center gap-1 text-slate-400 underline decoration-slate-300 decoration-dotted underline-offset-2"
+                >
+                    <Info size={11} className="shrink-0" />
+                    Before/after estimate, not attribution
+                </span>
             </div>
 
             {campaigns.length === 0 ? (

@@ -1,0 +1,30 @@
+[33mcommit 494ca6e02529f60ebcc4fd766f94452b78a94ea8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmanish-dev[m[33m, [m[1;31morigin/manish-dev[m[33m)[m
+Author: manish-kumar-jhax <manish@jhax.us>
+Date:   Fri Jul 17 18:35:21 2026 +0530
+
+    Polish the AI combo suggestion card on Promotions
+    
+    Presentation only - aiSuggest(), the /combos/generate call and the aiNote
+    contract are untouched, and all three fields (rationale, daypart, dropped) still
+    render.
+    
+    The card was a flat grey box stacking four lines of identical 12px text, so the
+    AI's reasoning, the daypart, the skipped-items warning and the editable hint all
+    carried the same weight and none read as the point.
+    
+    Rebuilt in the house "AI speaks" vocabulary - the same warm gradient, soft
+    orange orb and uppercase orange eyebrow as the Home briefing card - because this
+    is the same act: the AI reporting something it worked out from the owner's data.
+    Reusing that language rather than inventing a look for one card.
+    
+    Hierarchy now matches meaning:
+      - eyebrow names the source ("Built from your last 30 days")
+      - daypart moved out of prose into a chip with a clock glyph - it's a value,
+        not a sentence, and it reads correctly for "All day" as well as "Lunch"
+      - the rationale is the payload, so it gets the size and the room
+      - skipped items become a proper amber callout, only when there are any
+      - the editable hint drops to a quiet footer behind a hairline
+    
+    Build compiled successfully.
+    
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>

@@ -8,8 +8,6 @@ import {
     UtensilsCrossed,
     Megaphone,
     Sparkles,
-    TrendingUp,
-    ClipboardList,
     LogOut,
     LineChart,
 } from "lucide-react";
@@ -27,8 +25,8 @@ const NAV = [
     { to: "/marketing", label: "Marketing AI", Icon: Megaphone,      tid: TID.navMarketing },
     { to: "/campaign-roi", label: "Campaign ROI", Icon: LineChart,   tid: TID.navCampaignRoi },
     { to: "/promotions",label: "Promotions",   Icon: Sparkles,       tid: "nav-promotions" },
-    { to: "/forecast",  label: "Forecast",     Icon: TrendingUp,     tid: TID.navForecast },
-    { to: "/manager",   label: "Manager Mode", Icon: ClipboardList,  tid: TID.navManager },
+    // Forecast (/forecast) and Manager Mode (/manager) hidden from the nav for now —
+    // routes/components stay wired in the router so functionality is preserved for later.
 ];
 
 export default function Layout({ children }) {

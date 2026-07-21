@@ -38,7 +38,9 @@ function Splash() {
 // Single source of truth for where an authenticated user belongs right now:
 // finish onboarding → set a PIN → unlock with PIN → into the app ("/home").
 function firstStep({ needsOnboarding }) {
-    if (needsOnboarding) return "/onboarding";
+    // COMMENTED OUT — onboarding screen removed. First-time users skip the
+    // "Tell us about you" screen and go straight to the dashboard.
+    // if (needsOnboarding) return "/onboarding";
     // COMMENTED OUT — PIN setup/unlock steps removed (new AuthModal). Rollback if needed.
     // if (needsPinSetup) return "/set-pin";
     // if (locked) return "/unlock";

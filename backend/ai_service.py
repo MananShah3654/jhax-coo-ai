@@ -1,5 +1,5 @@
 """
-JhaPay AI COO - free-LLM powered AI brain (OpenAI-compatible API).
+JhaPay AI COO - LLM-powered AI brain (Google Gemini for chat, Groq for voice).
 
 Architecture (MCP-style, LLM never touches the DB):
   Frontend → AI Gateway → restaurant_context (via analytics.py) → Prompt
@@ -9,14 +9,17 @@ The LLM is given a strict system prompt + the structured snapshot for
 the current restaurant. It MUST reply in the executive "Decision Card"
 format: STATUS / REASON / OPPORTUNITY / ACTION / EXPECTED IMPACT.
 
-Provider: any OpenAI-compatible endpoint. Defaults to Groq's FREE tier
-(Llama 3.3 70B + Whisper). Configure via env in backend/.env:
-  LLM_API_KEY   (required)  — free key from https://console.groq.com/keys
-  LLM_API_BASE  (default: https://api.groq.com/openai/v1)
-  LLM_MODEL     (default: llama-3.3-70b-versatile)
-  STT_MODEL     (default: whisper-large-v3-turbo)
-  TTS_MODEL     (default: playai-tts)
-  TTS_VOICE     (default: Fritz-PlayAI)
+Providers:
+  - Chat / text brain → Google Gemini (OpenAI-compatible; has a free tier). Config:
+      GEMINI_API_KEY  (required for AI features)
+      GEMINI_MODEL    (default: gemini-3.5-flash)
+      GEMINI_API_BASE (default: Google's OpenAI-compatible endpoint)
+  - Voice (STT / TTS) → Groq, OpenAI-compatible. Config:
+      LLM_API_KEY   — free key from https://console.groq.com/keys
+      LLM_API_BASE  (default: https://api.groq.com/openai/v1)
+      STT_MODEL     (default: whisper-large-v3-turbo)
+      TTS_MODEL     (default: playai-tts)
+      TTS_VOICE     (default: Fritz-PlayAI)
 """
 from __future__ import annotations
 
@@ -31,15 +34,47 @@ from openai import AsyncOpenAI
 
 from analytics import restaurant_context, menu_performance, today_kpis
 
-# LLM config — any OpenAI-compatible endpoint (Groq by default). See backend/.env.
+# --- Chat brain: Google Gemini via its OpenAI-compatible endpoint. Has a FREE
+# tier (no billing required), so it slots into the same AsyncOpenAI client. ---
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_BASE = os.environ.get(
+    "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta/openai/")
+GEMINI_MODEL    = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+
+# --- Voice: Groq (Whisper STT + PlayAI TTS). Kept on its own OpenAI-compatible
+# client for transcribe/synthesize only. ---
 LLM_API_KEY  = os.environ.get("LLM_API_KEY", "")
 LLM_API_BASE = os.environ.get("LLM_API_BASE", "https://api.groq.com/openai/v1")
-LLM_MODEL    = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+LLM_MODEL    = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")  # kept for compat; chat is Gemini now
 STT_MODEL    = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
 TTS_MODEL    = os.environ.get("TTS_MODEL", "playai-tts")
 TTS_VOICE    = os.environ.get("TTS_VOICE", "Fritz-PlayAI")
 
+# Chat client → Gemini (OpenAI-compatible). Audio client → Groq.
+_chat   = AsyncOpenAI(api_key=GEMINI_API_KEY or "missing", base_url=GEMINI_API_BASE)
 _client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_API_BASE)
+
+
+def _require_chat_key() -> None:
+    if not GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set. Add it to backend/.env (or the server "
+            "environment) and restart the backend — the key is read once at startup."
+        )
+
+
+async def _chat_text(system: str, user: str, max_tokens: int = 1024,
+                     temperature: float = 0.7) -> str:
+    """One-shot chat completion → plain text (Gemini via OpenAI-compatible API)."""
+    _require_chat_key()
+    resp = await _chat.chat.completions.create(
+        model=GEMINI_MODEL,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": user}],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return resp.choices[0].message.content or ""
 
 SYSTEM_PROMPT = """You are JhaPay AI COO™ — a digital Chief Operating Officer for a restaurant owner.
 You are NOT ChatGPT. You are NOT a general assistant.
@@ -290,8 +325,9 @@ async def _raise_for_stream(resp: httpx.Response) -> None:
 
 async def stream_coo_reply(session_id: str, user_text: str, src) -> AsyncGenerator[str, None]:
     """Yield raw token strings as the model generates them (SSE-friendly)."""
-    stream = await _client.chat.completions.create(
-        model=LLM_MODEL,
+    _require_chat_key()
+    stream = await _chat.chat.completions.create(
+        model=GEMINI_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": _wrap_user(user_text, src)},
@@ -335,8 +371,9 @@ RULES:
 
 async def stream_labor_reply(question: str, context_json: str) -> AsyncGenerator[str, None]:
     """Stream a grounded natural-language answer over precomputed labor data."""
-    stream = await _client.chat.completions.create(
-        model=LLM_MODEL,
+    _require_chat_key()
+    stream = await _chat.chat.completions.create(
+        model=GEMINI_MODEL,
         messages=[
             {"role": "system", "content": LABOR_SYSTEM_PROMPT},
             {"role": "user", "content":
@@ -359,25 +396,75 @@ async def generate_campaign(audience: str, channel: str, goal: str) -> dict:
         f"Draft a {channel} campaign for the audience '{audience}'. "
         f"The goal is: {goal}. Keep it punchy and action-oriented."
     )
-    resp = await _client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[
-            {"role": "system", "content": (
-                "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
-                "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
-                "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
-                "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
-            )},
-            {"role": "user", "content": prompt},
-        ],
+    buf = await _chat_text(
+        system=(
+            "You are a restaurant marketing copywriter. Return STRICT JSON ONLY with "
+            "keys: subject (string, <=80 chars), body (string, <=400 chars, friendly "
+            "and on-brand for a casual upscale bistro called 'Jha Bistro'), cta "
+            "(string, <=20 chars), estimated_reach (integer), estimated_revenue (integer)."
+        ),
+        user=prompt,
+        max_tokens=512,
         temperature=0.7,
     )
-    buf = resp.choices[0].message.content or ""
     parsed = parse_coo_json(buf)
     if "subject" not in parsed:
         parsed = {"subject": "Your Jha Bistro Update", "body": buf[:400], "cta": "Order Now",
                   "estimated_reach": 0, "estimated_revenue": 0}
     return parsed
+
+
+# -------- AI-generated health-step actions (replaces the static templates) --------
+
+_HEALTH_METRIC_LABELS = {
+    "revenue_growth": "Revenue growth (last 7 days vs prior 7)",
+    "repeat_customers": "Repeat-customer rate",
+    "reviews": "Review / rating score",
+    "wait_times": "Order wait times",
+    "tips": "Tip rate",
+    "staff_efficiency": "Staff efficiency",
+}
+
+# Small cache so we don't call the LLM on every dashboard load — keyed by the
+# weak metrics + their (rounded) scores, which only change as the data moves.
+_HEALTH_ACTION_CACHE: dict[str, dict] = {}
+
+
+async def generate_health_actions(steps: list[dict], context: dict | None = None) -> dict:
+    """Turn the weak health metrics into specific, data-grounded one-line actions
+    via the LLM. Returns {metric_key: action_string}. Best-effort: returns {} on
+    no key / no steps / any error, so the caller keeps the built-in templates."""
+    if not GEMINI_API_KEY or not steps:
+        return {}
+    cache_key = json.dumps(
+        [(s.get("metric"), s.get("score")) for s in steps], sort_keys=True)
+    if cache_key in _HEALTH_ACTION_CACHE:
+        return _HEALTH_ACTION_CACHE[cache_key]
+
+    weak = [{"metric": s["metric"],
+             "label": _HEALTH_METRIC_LABELS.get(s["metric"], s["metric"]),
+             "score": s["score"]} for s in steps]
+    system = (
+        "You are a restaurant COO advising the owner. For EACH weak metric below, "
+        "write ONE specific, imperative next action (max 12 words) to improve it, "
+        "grounded in the provided numbers. Return STRICT JSON ONLY: an object that "
+        "maps each metric key to its action string. No prose, no markdown fences."
+    )
+    user = (
+        "Weak metrics (score 0-100, lower is worse):\n" + json.dumps(weak)
+        + "\n\nLive context:\n" + json.dumps(context or {}, default=str)
+    )
+    try:
+        buf = await _chat_text(system=system, user=user, max_tokens=800, temperature=0.5)
+        data = json.loads(_FENCE_RE.sub("", buf).strip())
+        actions = {k: v.strip() for k, v in data.items()
+                   if isinstance(v, str) and v.strip()}
+    except Exception:
+        return {}
+    if len(_HEALTH_ACTION_CACHE) > 100:  # cheap unbounded-growth guard
+        _HEALTH_ACTION_CACHE.clear()
+    _HEALTH_ACTION_CACHE[cache_key] = actions
+    return actions
 
 
 # -------- AI Combo builder (data-grounded, sales-optimized) --------
@@ -468,7 +555,7 @@ async def generate_combo(focus: str | None = None) -> dict:
     today_revenue = float(kpis.get("revenue", 0) or 0)
 
     fallback = _fallback_combo(top, today_revenue)
-    if not LLM_API_KEY:
+    if not GEMINI_API_KEY:
         return fallback
 
     catalog = [
@@ -500,13 +587,8 @@ async def generate_combo(focus: str | None = None) -> dict:
         f"avg order ${kpis.get('avg_order_value', 0):.2f}.{focus_line}"
     )
     try:
-        resp = await _client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": user}],
-            temperature=0.8,
-        )
-        parsed = parse_coo_json(resp.choices[0].message.content or "")
+        buf = await _chat_text(system=system, user=user, max_tokens=800, temperature=0.8)
+        parsed = parse_coo_json(buf)
     except Exception:
         return fallback
 
@@ -554,28 +636,24 @@ async def _enhance_image_prompt(description: str, style: str) -> str:
         f"lighting, shallow depth of field, high detail, clean composition with "
         f"empty space for a headline, no text, no watermark, no logo."
     )
-    if not LLM_API_KEY:
+    if not GEMINI_API_KEY:
         return base
     try:
-        resp = await _client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[
-                {"role": "system", "content": (
-                    "You write concise text-to-image prompts for restaurant "
-                    "promotional banners. Reply with ONE prompt, max 55 words, "
-                    "vivid and photographic. Always end with: 'clean composition "
-                    "with empty space for a headline, no text, no watermark'. "
-                    "No preamble, no quotes."
-                )},
-                {"role": "user", "content": (
-                    f"Banner for 'Jha Bistro'. Owner's idea: {description.strip()}. "
-                    f"Preferred style: {style}."
-                )},
-            ],
+        txt = (await _chat_text(
+            system=(
+                "You write concise text-to-image prompts for restaurant "
+                "promotional banners. Reply with ONE prompt, max 55 words, "
+                "vivid and photographic. Always end with: 'clean composition "
+                "with empty space for a headline, no text, no watermark'. "
+                "No preamble, no quotes."
+            ),
+            user=(
+                f"Banner for 'Jha Bistro'. Owner's idea: {description.strip()}. "
+                f"Preferred style: {style}."
+            ),
+            max_tokens=200,
             temperature=0.8,
-            max_tokens=160,
-        )
-        txt = (resp.choices[0].message.content or "").strip()
+        )).strip()
         return txt or base
     except Exception:
         return base

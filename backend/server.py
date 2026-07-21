@@ -1,5 +1,5 @@
 """
-JhaPay AI COO™ - Backend API.
+JHAX - Backend API.
 
 Endpoints (all under /api):
   GET  /                          - health
@@ -66,12 +66,12 @@ from sqlalchemy.orm import Session  # noqa: E402
 # No module-global data source anymore: each request builds an owner-scoped
 # source via get_source(user.id). See data_source.get_source.
 
-app = FastAPI(title="JhaPay AI COO API")
+app = FastAPI(title="JHAX API")
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("jhapay")
+logger = logging.getLogger("jhax")
 
 
 # -------------------- Schemas --------------------
@@ -156,7 +156,7 @@ def _validate_pin(pin: str) -> str:
 # -------------------- Health / Auth --------------------
 @api.get("/")
 async def root():
-    return {"service": "JhaPay AI COO", "version": "1.0", "ok": True}
+    return {"service": "JHAX", "version": "1.0", "ok": True}
 
 
 @api.get("/me")

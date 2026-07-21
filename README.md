@@ -1,11 +1,11 @@
-# JhaPay AI COO™
+# JHAX
 
 **The AI Operating System for Restaurant Owners.**
 Ask your restaurant anything. Get one decisive answer. Execute one action. In under 30 seconds.
 
 > _"One Question. One Answer. One Action."_
 
-JhaPay AI COO is not a chatbot and not a dashboard. It's a digital Chief Operating Officer that understands restaurant data, analyzes performance, recommends actions, executes business workflows, and shares branded PDF reports — all from a single voice or text prompt.
+JHAX is not a chatbot and not a dashboard. It's a digital Chief Operating Officer that understands restaurant data, analyzes performance, recommends actions, executes business workflows, and shares branded PDF reports — all from a single voice or text prompt.
 
 ---
 
@@ -313,4 +313,4 @@ Proprietary — © JhaPay. All rights reserved.
 
 ---
 
-<sub>JhaPay AI COO™. Understand. Analyze. Recommend. Execute. Share.</sub>
+<sub>JHAX™. Understand. Analyze. Recommend. Execute. Share.</sub>

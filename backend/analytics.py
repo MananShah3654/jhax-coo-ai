@@ -1,5 +1,5 @@
 """
-JhaPay AI COO - Analytics helpers.
+JHAX - Analytics helpers.
 
 Pure functions that read the in-memory DATASET and compute KPIs, branch
 performance, customer cohorts, menu performance, forecasts, and a

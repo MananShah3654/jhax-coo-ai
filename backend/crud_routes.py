@@ -1,5 +1,5 @@
 """
-CRUD / onboarding routes for JhaPay AI COO.
+CRUD / onboarding routes for JHAX.
 
 These let a signed-in owner build their real data — restaurants (locations),
 menu items, customers, and orders — instead of relying on a mock seed. Every

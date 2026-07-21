@@ -27,10 +27,7 @@ export default function Logo({ size = 28, className = "" }) {
             </div>
             <div className="flex flex-col leading-none">
                 <span className="font-display text-[17px] font-semibold tracking-tight text-slate-900">
-                    JhaPay
-                </span>
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF6B35]">
-                    AI COO™
+                    JHAX
                 </span>
             </div>
         </div>

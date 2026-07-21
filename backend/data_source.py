@@ -1,5 +1,5 @@
 """
-DataSource adapter for JhaPay AI COO.
+DataSource adapter for JHAX.
 
 The COO never reads `mock_data.py` directly anymore. It reads through a
 DataSource, which today is `MockDataSource` (deterministic seeded data)

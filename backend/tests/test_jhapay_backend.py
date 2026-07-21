@@ -1,5 +1,5 @@
 """
-JhaPay AI COO™ backend regression tests (multi-tenant).
+JHAX backend regression tests (multi-tenant).
 
 Runs IN-PROCESS against a FastAPI TestClient, not a remote URL. Auth is
 satisfied by overriding `get_current_user` with a freshly-created test owner,
@@ -138,7 +138,7 @@ class TestHealthAuth:
         assert r.status_code == 200
         d = r.json()
         assert d.get("ok") is True
-        assert d.get("service") == "JhaPay AI COO"
+        assert d.get("service") == "JHAX"
 
     def test_business_route_requires_auth(self, owner):
         # With no override active, /dashboard must reject the request.

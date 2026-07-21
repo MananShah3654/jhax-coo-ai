@@ -1,5 +1,5 @@
 """
-Local PostgreSQL persistence for JhaPay AI COO.
+Local PostgreSQL persistence for JHAX.
 
 Uses SQLAlchemy 2.0 (sync engine + psycopg2). The connection string comes from
 DATABASE_URL in .env, e.g.:

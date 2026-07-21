@@ -1,4 +1,4 @@
-# Local PostgreSQL for JhaPay AI COO.
+# Local PostgreSQL for JHAX.
 #
 #   docker compose up -d        # start Postgres in the background
 #   docker compose ps           # check status / health

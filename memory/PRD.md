@@ -1,7 +1,7 @@
-# JhaPay AI COO™ — Product Requirements
+# JHAX — Product Requirements
 
 ## Original Problem Statement
-Build "JhaPay AI COO™ — The AI Operating System for Restaurant Owners." A voice-first, zero-dashboard executive control center where restaurant owners run their whole business by asking natural-language / voice questions and getting one decisive answer + one-click action. Reuse JhaPay branding (orange #FF6B35 primary). Tagline: "Ask Your Restaurant Anything." Philosophy: **One Question → One Answer → One Action**.
+Build "JHAX — The AI Operating System for Restaurant Owners." A voice-first, zero-dashboard executive control center where restaurant owners run their whole business by asking natural-language / voice questions and getting one decisive answer + one-click action. Reuse JhaPay branding (orange #FF6B35 primary). Tagline: "Ask Your Restaurant Anything." Philosophy: **One Question → One Answer → One Action**.
 
 ## User Personas
 - **Restaurant Owner / CEO** — primary. Needs decisions, not dashboards. Cares about revenue, customers, branch performance, growth.
@@ -44,7 +44,7 @@ Frontend → AI Gateway (/api/ai/chat SSE) → restaurant_context (analytics.py)
   - Launch Campaign → /marketing prefilled (audience/channel/goal flow through sessionStorage + location.state).
   - Share Report → global ShareModal: live PDF preview + WhatsApp (wa.me) + Email (mailto:) + Download PDF.
   - Navigate actions → React Router push to the right screen.
-- **Real PDF reports**: `/api/reports/{type}/pdf` for all 6 types (daily/weekly/monthly/branch/investor/marketing) via reportlab, branded JhaPay AI COO™ executive layout.
+- **Real PDF reports**: `/api/reports/{type}/pdf` for all 6 types (daily/weekly/monthly/branch/investor/marketing) via reportlab, branded JHAX executive layout.
 - **DataSource adapter**: new `/app/backend/data_source.py` with `MockDataSource` (default) and `JhaPOSDataSource` (HTTP, plug-in via `DATA_SOURCE=jhapos`, `JHAPOS_API_URL`, `JHAPAY_WALLET_API_URL`, `LOYALTY_API_URL`, `JHAPOS_API_KEY` env vars). Falls back per-resource so partial wiring works. `/api/dashboard` now exposes `data_source` field.
 - **Backend tests**: 33/33 pytest pass (12 new tests covering PDF + clarify + concision + adapter).
 

@@ -1,5 +1,5 @@
 """
-JhaPay AI COO - Deterministic mock restaurant data generator.
+JHAX - Deterministic mock restaurant data generator.
 
 Seeded with a fixed RNG so the same data is returned every cold start.
 Represents a 4-branch restaurant chain "Jha Bistro" with 30 days of

@@ -65,19 +65,19 @@ export default function ShareModal() {
     if (!open) return null;
 
     const directPdf = `${API}/reports/${type}/pdf`;
-    const waText = `JhaPay AI COO ${type} report — ${directPdf}`;
+    const waText = `JHAX ${type} report — ${directPdf}`;
     const waHref = `https://wa.me/?text=${encodeURIComponent(waText)}`;
     const mailHref = `mailto:?subject=${encodeURIComponent(
-        `JhaPay ${type[0].toUpperCase() + type.slice(1)} Report`
+        `JHAX ${type[0].toUpperCase() + type.slice(1)} Report`
     )}&body=${encodeURIComponent(
-        `Here's your latest restaurant ${type} report from JhaPay AI COO.\n\n${directPdf}`
+        `Here's your latest restaurant ${type} report from JHAX.\n\n${directPdf}`
     )}`;
 
     const download = () => {
         if (!pdfUrl) return;
         const a = document.createElement("a");
         a.href = pdfUrl;
-        a.download = `jhapay_${type}_report.pdf`;
+        a.download = `jhax_${type}_report.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();

@@ -1,4 +1,4 @@
-"""PDF report generator using reportlab — branded for JhaPay AI COO™.
+"""PDF report generator using reportlab — branded for JHAX.
 Outputs an executive 1-2 page PDF a restaurant owner can WhatsApp / email instantly."""
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _on_first_page(canvas, doc):
     canvas.setFillColor(colors.white)
     canvas.setFont("Helvetica-Bold", 9)
     canvas.drawCentredString(LETTER[0] - 1.0 * inch, LETTER[1] - 0.38 * inch,
-                             "JhaPay AI COO™")
+                             "JHAX")
     # Footer
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 8)
@@ -110,7 +110,7 @@ def build_report_pdf(
         buf, pagesize=LETTER,
         leftMargin=0.6 * inch, rightMargin=0.6 * inch,
         topMargin=0.7 * inch, bottomMargin=0.6 * inch,
-        title=f"JhaPay AI COO — {report_type.title()} Report",
+        title=f"JHAX — {report_type.title()} Report",
     )
     st = _styles()
     story = []

@@ -45,6 +45,8 @@ function firstStep({ needsOnboarding , needsPosSetup}) {
     // COMMENTED OUT — PIN setup/unlock steps removed (new AuthModal). Rollback if needed.
     // if (needsPinSetup) return "/set-pin";
     // if (locked) return "/unlock";
+    // First-time users pick a POS (which seeds their demo data) before the app.
+    if (needsPosSetup) return "/connect-pos";
     return "/home";
 }
 

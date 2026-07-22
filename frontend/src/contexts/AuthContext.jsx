@@ -162,14 +162,13 @@ export function AuthProvider({ children }) {
     };
 
     const auth = fbUser ? { mode: "firebase", user: profile } : null;
-    // A session only counts as "active" (allowed into onboarding / the app) when
-    // identity was proven THIS page-load — either a fresh login (unlocked) or a
-    // complete account with a PIN to unlock. A cold-restored, not-yet-finished
-    // session (no PIN, mid-onboarding) is NOT active: the user must log in first,
-    // so we never auto-redirect a freshly-opened app straight to /onboarding.
-    const sessionActive = Boolean(
-        fbUser && (unlocked || (profile && profile.has_pin))
-    );
+    // Any authenticated Firebase session counts as "active". Firebase persists
+    // the session (IndexedDB, default local persistence) and auto-refreshes the
+    // ID token, so a returning user stays logged in across reloads/restarts
+    // without signing in again. `unlocked` (true right after a fresh sign-in) is
+    // OR'd in but redundant — it implies fbUser — so this stays equivalent to
+    // Boolean(fbUser) while keeping the fresh-login signal referenced.
+    const sessionActive = Boolean(fbUser || unlocked);
     const needsOnboarding = Boolean(
         fbUser && (!profile || !profile.restaurant_name)
     );

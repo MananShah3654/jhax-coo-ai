@@ -52,6 +52,10 @@ class User(Base):
     phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     restaurant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Which POS the owner "connected" during onboarding (square/clover/toast/...).
+    # We have no live POS API yet, so picking one just seeds demo data for the
+    # owner; NULL means the POS-connect step hasn't been completed.
+    pos_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # bcrypt hash of the user's quick-unlock PIN (never returned to the client).
     pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -66,6 +70,7 @@ class User(Base):
             "phone_number": self.phone_number,
             "name": self.name,
             "restaurant_name": self.restaurant_name,
+            "pos_provider": self.pos_provider,
             # Expose only whether a PIN exists, never the hash itself.
             "has_pin": bool(self.pin_hash),
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -447,6 +452,19 @@ def init_db() -> None:
         conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(255)")
         )
+        # POS the owner connected during onboarding (seeds demo data; see demo_seed).
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pos_provider VARCHAR(32)")
+        )
+        # Backfill: owners who already have restaurants predate the POS-connect
+        # step — mark them 'existing' so they aren't forced through it. A brand-
+        # new user has no restaurants until they pick a POS, so this never traps
+        # them (idempotent: only touches NULLs).
+        conn.execute(text(
+            "UPDATE users u SET pos_provider = 'existing' "
+            "WHERE u.pos_provider IS NULL "
+            "AND EXISTS (SELECT 1 FROM restaurants r WHERE r.owner_id = u.id)"
+        ))
         # Lets sync_square.py map a Square location back to a local restaurant.
         conn.execute(
             text("ALTER TABLE restaurants "

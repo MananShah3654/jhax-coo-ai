@@ -177,6 +177,13 @@ export function AuthProvider({ children }) {
     // const needsPinSetup = Boolean(
     //     fbUser && profile && (!profile.has_pin || forcePinSetup)
     // );
+    // A first-time user must "connect" a POS (which seeds their demo data)
+    // before entering the app. pos_provider stays NULL until they pick one.
+    // NOTE: onboarding was removed, so we no longer require restaurant_name here
+    // (new users don't have one yet); the seed defaults the restaurant name.
+    const needsPosSetup = Boolean(
+        fbUser && profile && !profile.pos_provider
+    );
     // const locked = Boolean(
     //     fbUser && profile && profile.has_pin && !unlocked && !forcePinSetup
     // );
@@ -193,6 +200,7 @@ export function AuthProvider({ children }) {
                 needsOnboarding,
                 // COMMENTED OUT — replaced by new AuthModal. Rollback if needed.
                 // needsPinSetup,
+                needsPosSetup,
                 // locked,
                 loginWithEmail,
                 registerWithEmail,

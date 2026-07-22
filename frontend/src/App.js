@@ -7,6 +7,7 @@ import ShareModal from "@/components/ShareModal";
 // import Login from "@/screens/Login";
 import AuthPage from "@/screens/AuthPage";
 import Onboarding from "@/screens/Onboarding";
+import ConnectPos from "@/screens/ConnectPos";
 
 
 // COMMENTED OUT — PIN quick-unlock removed, replaced by new AuthModal. Rollback if needed.
@@ -37,13 +38,15 @@ function Splash() {
 
 // Single source of truth for where an authenticated user belongs right now:
 // finish onboarding → set a PIN → unlock with PIN → into the app ("/home").
-function firstStep({ needsOnboarding }) {
+function firstStep({ needsOnboarding , needsPosSetup}) {
     // COMMENTED OUT — onboarding screen removed. First-time users skip the
     // "Tell us about you" screen and go straight to the dashboard.
     // if (needsOnboarding) return "/onboarding";
     // COMMENTED OUT — PIN setup/unlock steps removed (new AuthModal). Rollback if needed.
     // if (needsPinSetup) return "/set-pin";
     // if (locked) return "/unlock";
+    // First-time users pick a POS (which seeds their demo data) before the app.
+    if (needsPosSetup) return "/connect-pos";
     return "/home";
 }
 
@@ -117,6 +120,14 @@ function AppRoutes() {
                     </StepRoute>
                 }
             /> */}
+            <Route
+                path="/connect-pos"
+                element={
+                    <StepRoute path="/connect-pos">
+                        <ConnectPos />
+                    </StepRoute>
+                }
+            />
             <Route
                 path="/home"
                 element={

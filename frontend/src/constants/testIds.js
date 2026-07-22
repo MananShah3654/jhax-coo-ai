@@ -27,6 +27,11 @@ export const TID = {
     onboardContact: "onboard-contact-input",
     onboardSubmit: "onboard-submit",
 
+    // Auth — connect a POS (first-time; seeds demo data)
+    posTile: (provider) => `pos-tile-${provider}`,
+    posError: "pos-error",
+    posSkip: "pos-skip",
+
     // Auth — PIN quick-unlock
     setPinDigit: (d) => `set-pin-digit-${d}`,
     setPinContinue: "set-pin-continue",

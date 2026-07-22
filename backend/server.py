@@ -146,6 +146,15 @@ class PinBody(BaseModel):
     pin: str
 
 
+# POS providers offered on the onboarding "Connect a POS" step. We have no live
+# POS integration yet, so any pick just seeds demo data (see demo_seed).
+_VALID_POS = {"square", "clover", "toast", "lightspeed", "spoton", "shopify"}
+
+
+class ConnectPosBody(BaseModel):
+    provider: str
+
+
 def _validate_pin(pin: str) -> str:
     pin = (pin or "").strip()
     if not (pin.isdigit() and len(pin) == 4):
@@ -218,6 +227,31 @@ async def verify_pin(
     if not verify_user_pin(user, req.pin):
         raise HTTPException(403, "Incorrect PIN.")
     return {"ok": True}
+
+
+@api.post("/me/connect-pos")
+async def connect_pos(
+    req: ConnectPosBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Onboarding: "connect" a POS by seeding a demo dataset for this owner.
+
+    We have no live POS API yet, so picking a provider populates the owner's
+    account with a realistic single-restaurant dataset (menu, customers, orders,
+    team, shifts) named after their onboarding restaurant_name. Re-connecting or
+    switching providers wipes the prior demo rows and reseeds. Marks the user's
+    pos_provider so the onboarding gate lets them into the app.
+    """
+    provider = (req.provider or "").strip().lower()
+    if provider not in _VALID_POS:
+        raise HTTPException(400, f"Unknown POS provider: {req.provider!r}")
+    from demo_seed import seed_demo_for_owner  # local import: seeds on demand
+    counts = seed_demo_for_owner(db, user.id, user.restaurant_name, provider)
+    user.pos_provider = provider
+    db.commit()
+    db.refresh(user)
+    return {"ok": True, "user": user.as_dict(), "seeded": counts}
 
 
 # -------------------- Dashboard / Briefing --------------------

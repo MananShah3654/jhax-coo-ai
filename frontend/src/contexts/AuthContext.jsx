@@ -162,6 +162,12 @@ export function AuthProvider({ children }) {
     const needsPinSetup = Boolean(
         fbUser && profile && (!profile.has_pin || forcePinSetup)
     );
+    // After onboarding + PIN, a first-time user must "connect" a POS (which
+    // seeds their demo data). pos_provider stays NULL until they pick one.
+    const needsPosSetup = Boolean(
+        fbUser && profile && profile.restaurant_name && profile.has_pin
+        && !forcePinSetup && !profile.pos_provider
+    );
     const locked = Boolean(
         fbUser && profile && profile.has_pin && !unlocked && !forcePinSetup
     );
@@ -177,6 +183,7 @@ export function AuthProvider({ children }) {
                 sessionActive,
                 needsOnboarding,
                 needsPinSetup,
+                needsPosSetup,
                 locked,
                 loginWithEmail,
                 registerWithEmail,

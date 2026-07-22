@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import ShareModal from "@/components/ShareModal";
 import Login from "@/screens/Login";
 import Onboarding from "@/screens/Onboarding";
+import ConnectPos from "@/screens/ConnectPos";
 
 
 import PinSetup from "@/screens/PinSetup";
@@ -34,10 +35,11 @@ function Splash() {
 
 // Single source of truth for where an authenticated user belongs right now:
 // finish onboarding → set a PIN → unlock with PIN → into the app ("/home").
-function firstStep({ needsOnboarding, needsPinSetup, locked }) {
+function firstStep({ needsOnboarding, needsPinSetup, locked, needsPosSetup }) {
     if (needsOnboarding) return "/onboarding";
     if (needsPinSetup) return "/set-pin";
     if (locked) return "/unlock";
+    if (needsPosSetup) return "/connect-pos";
     return "/home";
 }
 
@@ -105,6 +107,14 @@ function AppRoutes() {
                 element={
                     <StepRoute path="/unlock">
                         <PinLock />
+                    </StepRoute>
+                }
+            />
+            <Route
+                path="/connect-pos"
+                element={
+                    <StepRoute path="/connect-pos">
+                        <ConnectPos />
                     </StepRoute>
                 }
             />

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
     Home,
@@ -12,6 +13,7 @@ import {
     LineChart,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import Logo from "@/components/Logo";
 import { TID } from "@/constants/testIds";
 
@@ -33,7 +35,22 @@ export default function Layout({ children }) {
     const { profile, logout } = useAuth();
     const navigate = useNavigate();
     const displayName = profile?.name || "Owner";
-    const displayRestaurant = profile?.restaurant_name || "";
+    // The real branch name lives on the restaurant record (seeded when the owner
+    // connects a POS). Fall back to the profile's restaurant_name, then a label.
+    const [branchName, setBranchName] = useState("");
+    useEffect(() => {
+        let alive = true;
+        api.get("/restaurants")
+            .then((r) => {
+                if (alive) setBranchName(r.data?.restaurants?.[0]?.name || "");
+            })
+            .catch(() => {});
+        return () => {
+            alive = false;
+        };
+    }, []);
+    const displayRestaurant =
+        branchName || profile?.restaurant_name || "My Restaurant";
     const handleLogout = async () => {
         await logout();
         navigate("/");
@@ -83,8 +100,13 @@ export default function Layout({ children }) {
                         <div className="mt-0.5 text-sm font-semibold text-slate-900">
                             {displayName}
                         </div>
-                        <div className="text-xs text-slate-500">
-                            {displayRestaurant}
+                        <div
+                            data-testid="sidebar-branch-name"
+                            className="mt-0.5 flex items-center gap-1 text-xs text-slate-500"
+                            title={displayRestaurant}
+                        >
+                            <MapPin size={11} className="shrink-0 text-[#FF6B35]" />
+                            <span className="truncate">{displayRestaurant}</span>
                         </div>
                     </div>
                     <button
@@ -98,12 +120,16 @@ export default function Layout({ children }) {
             </aside>
 
             {/* Mobile top nav */}
-            <div className="fixed inset-x-0 top-0 z-40 flex items-center justify-between border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur-xl lg:hidden">
+            <div className="fixed inset-x-0 top-0 z-40 flex items-center justify-between gap-2 border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur-xl lg:hidden">
                 <Logo />
+                <div className="flex min-w-0 items-center gap-1 text-sm font-semibold text-slate-800">
+                    <MapPin size={13} className="shrink-0 text-[#FF6B35]" />
+                    <span className="truncate">{displayRestaurant}</span>
+                </div>
                 <button
                     data-testid={TID.pinLogout + "-m"}
                     onClick={handleLogout}
-                    className="rounded-full bg-slate-100 p-2 text-slate-700"
+                    className="shrink-0 rounded-full bg-slate-100 p-2 text-slate-700"
                 >
                     <LogOut size={14} />
                 </button>

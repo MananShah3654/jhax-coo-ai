@@ -52,7 +52,7 @@ from analytics import (  # noqa: E402
 )
 from ai_service import (  # noqa: E402
     stream_coo_reply, transcribe_audio, synthesize_speech, generate_campaign,
-    build_campaign_image, generate_combo, parse_coo_json,
+    build_campaign_image, generate_combo, parse_coo_json, generate_health_actions,
 )
 from pdf_report import build_report_pdf  # noqa: E402
 from database import (  # noqa: E402
@@ -68,6 +68,11 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 app = FastAPI(title="JHAX API")
 api = APIRouter(prefix="/api")
+
+
+@app.get("/")
+async def hello():
+    return {"message": "Hello! JhaPay AI COO backend is running 🚀", "ok": True}
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -258,14 +263,29 @@ async def connect_pos(
 @api.get("/dashboard")
 async def dashboard(user: User = Depends(get_current_user)):
     src = get_source(user.id)
+    today = today_kpis(src)
+    # Repeat Customer Rate is a cohort snapshot (not a daily window), so it
+    # comes from customer_intelligence rather than today_kpis — surfaced here
+    # so the dashboard can show all headline KPIs from one call.
+    repeat_rate = customer_intelligence(src)["repeat_rate_pct"]
+    health = health_score(src)
+    # Replace each weak health step's built-in template action with a specific,
+    # data-grounded action written live by the LLM (Gemini). Best-effort: on any
+    # failure or missing key the built-in _HEALTH_ACTIONS templates remain.
+    ai_actions = await generate_health_actions(
+        health["steps"],
+        {"revenue": today.get("revenue"), "orders": today.get("orders"),
+         "tips": today.get("tips"), "repeat_rate_pct": repeat_rate,
+         "health_score": health.get("score")},
+    )
+    for step in health["steps"]:
+        if ai_actions.get(step["metric"]):
+            step["action"] = ai_actions[step["metric"]]
     return {
         "owner": {"name": user.name, "restaurant": user.restaurant_name},
-        "today": today_kpis(src),
-        # Repeat Customer Rate is a cohort snapshot (not a daily window), so it
-        # comes from customer_intelligence rather than today_kpis — surfaced here
-        # so the dashboard can show all headline KPIs from one call.
-        "repeat_rate_pct": customer_intelligence(src)["repeat_rate_pct"],
-        "health": health_score(src),
+        "today": today,
+        "repeat_rate_pct": repeat_rate,
+        "health": health,
         "briefing": daily_briefing(src),
         "branches_top3": branch_performance(src, 7)[:3],
         # Last 14 days of daily revenue, kept for API consumers.

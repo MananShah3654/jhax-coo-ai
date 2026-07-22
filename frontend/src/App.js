@@ -3,13 +3,16 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import ShareModal from "@/components/ShareModal";
-import Login from "@/screens/Login";
+// COMMENTED OUT — replaced by new AuthModal (Google/Apple/Phone/Email). Rollback if needed.
+// import Login from "@/screens/Login";
+import AuthPage from "@/screens/AuthPage";
 import Onboarding from "@/screens/Onboarding";
 import ConnectPos from "@/screens/ConnectPos";
 
 
-import PinSetup from "@/screens/PinSetup";
-import PinLock from "@/screens/PinLock";
+// COMMENTED OUT — PIN quick-unlock removed, replaced by new AuthModal. Rollback if needed.
+// import PinSetup from "@/screens/PinSetup";
+// import PinLock from "@/screens/PinLock";
 import Home from "@/screens/Home";
 import Chat from "@/screens/Chat";
 import Branches from "@/screens/Branches";
@@ -35,11 +38,13 @@ function Splash() {
 
 // Single source of truth for where an authenticated user belongs right now:
 // finish onboarding → set a PIN → unlock with PIN → into the app ("/home").
-function firstStep({ needsOnboarding, needsPinSetup, locked, needsPosSetup }) {
-    if (needsOnboarding) return "/onboarding";
-    if (needsPinSetup) return "/set-pin";
-    if (locked) return "/unlock";
-    if (needsPosSetup) return "/connect-pos";
+function firstStep({ needsOnboarding , needsPosSetup}) {
+    // COMMENTED OUT — onboarding screen removed. First-time users skip the
+    // "Tell us about you" screen and go straight to the dashboard.
+    // if (needsOnboarding) return "/onboarding";
+    // COMMENTED OUT — PIN setup/unlock steps removed (new AuthModal). Rollback if needed.
+    // if (needsPinSetup) return "/set-pin";
+    // if (locked) return "/unlock";
     return "/home";
 }
 
@@ -82,7 +87,9 @@ function AppRoutes() {
                 path="/"
                 element={
                     <GuestOnly>
-                        <Login />
+                        {/* COMMENTED OUT — replaced by new AuthModal. Rollback if needed. */}
+                        {/* <Login /> */}
+                        <AuthPage />
                     </GuestOnly>
                 }
             />
@@ -94,7 +101,8 @@ function AppRoutes() {
                     </StepRoute>
                 }
             />
-            <Route
+            {/* COMMENTED OUT — PIN setup/unlock routes removed (new AuthModal). Rollback if needed. */}
+            {/* <Route
                 path="/set-pin"
                 element={
                     <StepRoute path="/set-pin">
@@ -109,7 +117,7 @@ function AppRoutes() {
                         <PinLock />
                     </StepRoute>
                 }
-            />
+            /> */}
             <Route
                 path="/connect-pos"
                 element={

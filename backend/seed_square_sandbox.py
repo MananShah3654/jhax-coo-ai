@@ -16,6 +16,11 @@ What it does:
       - regulars        (a handful of orders)
       - occasional      (1-3 orders -> new / one-time)
     Orders reference existing catalog variations; Square prices them.
+  * Ensures ~TIP_TARGET_ORDERS orders carry a tip (each TIP_MIN_PCT-TIP_MAX_PCT of
+    the order total) so the "Total in tips" KPI shows real numbers instead of
+    "not tracked". Tips in Square ride on the tender and CANNOT be added to an
+    already-completed order, so each tipped order is created fresh and paid with
+    tip_money via the sandbox card. Idempotent: only the shortfall is created.
 
 NOTE on dates: Square stamps every order created_at = "now" and rejects
 backdated orders, so these orders all land today. To make the 30-day / weekly
@@ -66,6 +71,14 @@ RNG = random.Random(42)
 
 TARGET_CUSTOMERS = 100         # topped up from whatever already exists
 TARGET_ORDERS = 1000           # topped up toward (orders can't be deleted)
+
+# Tips — Square can't add a tip to an already-completed order (tips ride on the
+# tender), so we ensure a realistic number of FRESH orders are created and paid
+# WITH a tip. TIP_TARGET_ORDERS is the count to converge on; each tip is a random
+# share in [TIP_MIN_PCT, TIP_MAX_PCT] of that order's total.
+TIP_TARGET_ORDERS = 400
+TIP_MIN_PCT = 0.10
+TIP_MAX_PCT = 0.20
 
 # Name pools for varied test customers.
 FIRST_NAMES = [
@@ -269,6 +282,111 @@ def create_orders(location_id: str, specs: list[dict]) -> int:
     return made
 
 
+def _search_all_orders(location_id: str) -> list[dict]:
+    """Fetch every order at the location (paginated) so we can backfill tips."""
+    start_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=400)).isoformat()
+    out: list[dict] = []
+    cursor = None
+    for _ in range(60):
+        body = {
+            "location_ids": [location_id],
+            "query": {"filter": {"date_time_filter": {"created_at": {"start_at": start_at}}}},
+            "limit": 500,
+        }
+        if cursor:
+            body["cursor"] = cursor
+        data = _post("/v2/orders/search", body)
+        out.extend(data.get("orders") or [])
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+    return out
+
+
+def _pay_with_tip(order_id: str, location_id: str, net_cents: int, tip_cents: int) -> bool:
+    """Pay an OPEN order with the sandbox test card plus a tip, so the order's
+    total_tip_money is populated (Square derives it from the tender — you can't
+    set it on the order directly). Best-effort with a small retry."""
+    body = {
+        "idempotency_key": str(uuid.uuid4()),
+        # Square sandbox test card token that always succeeds.
+        "source_id": "cnon:card-nonce-ok",
+        "amount_money": {"amount": net_cents, "currency": "USD"},
+        "tip_money": {"amount": tip_cents, "currency": "USD"},
+        "order_id": order_id,
+        "location_id": location_id,
+        "autocomplete": True,
+    }
+    for attempt in range(3):
+        r = httpx.post(f"{BASE}/v2/payments", headers=HEADERS, json=body, timeout=20.0)
+        if r.status_code < 300:
+            return True
+        if r.status_code in (429, 500, 503) and attempt < 2:
+            continue
+        print(f"  ! tip payment {order_id} -> {r.status_code}: {r.text[:160]}")
+        return False
+    return False
+
+
+def create_tipped_orders(location_id: str, customer_ids: list[str],
+                         var_ids: list[str]) -> None:
+    """Ensure ~TIP_TARGET_ORDERS orders carry a tip so the 'Total in tips' KPI
+    shows real numbers. Square can't add a tip to an already-completed order, so
+    each tipped order is created fresh and paid WITH tip_money in one go (proven:
+    a new order is OPEN, and a card payment with tip_money completes it and
+    populates total_tip_money). Idempotent — only the shortfall is created."""
+    existing = _search_all_orders(location_id)
+    existing_tipped = sum(
+        1 for o in existing if (o.get("total_tip_money") or {}).get("amount"))
+    need = max(0, TIP_TARGET_ORDERS - existing_tipped)
+    if need == 0:
+        print(f"Tips: {existing_tipped} tipped orders already exist "
+              f"(target {TIP_TARGET_ORDERS}) — nothing to add")
+        return
+    print(f"Tips: {existing_tipped} tipped orders exist; creating {need} new "
+          f"tipped orders ({int(TIP_MIN_PCT * 100)}-{int(TIP_MAX_PCT * 100)}% tip)")
+
+    specs = build_order_specs(customer_ids, var_ids, need)
+    # Pick tip percentages on the main thread (random.Random isn't thread-safe).
+    tip_pcts = [RNG.uniform(TIP_MIN_PCT, TIP_MAX_PCT) for _ in specs]
+
+    def _one(arg: tuple) -> bool:
+        spec, pct = arg
+        order = None
+        for attempt in range(3):
+            r = httpx.post(f"{BASE}/v2/orders", headers=HEADERS, timeout=20.0, json={
+                "idempotency_key": str(uuid.uuid4()),
+                "order": {
+                    "location_id": location_id,
+                    "customer_id": spec["customer_id"],
+                    "line_items": spec["line_items"],
+                },
+            })
+            if r.status_code < 300:
+                order = r.json().get("order") or {}
+                break
+            if r.status_code in (429, 500, 503) and attempt < 2:
+                continue
+            print(f"  ! tipped order -> {r.status_code}: {r.text[:120]}")
+            return False
+        if not order:
+            return False
+        oid = order.get("id")
+        net = (order.get("total_money") or {}).get("amount", 0)
+        if not oid or net <= 0:
+            return False
+        return _pay_with_tip(oid, location_id, net, max(1, round(net * pct)))
+
+    made = 0
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for i, ok in enumerate(pool.map(_one, zip(specs, tip_pcts)), 1):
+            made += 1 if ok else 0
+            if i % 100 == 0:
+                print(f"  ...{i}/{len(specs)} tipped orders")
+    print(f"Tips: created {made}/{len(specs)} tipped orders "
+          f"(now ~{existing_tipped + made} tipped, target {TIP_TARGET_ORDERS})")
+
+
 def main() -> None:
     print(f"Seeding Square sandbox at {BASE}\n")
     loc = get_location_id()
@@ -284,6 +402,9 @@ def main() -> None:
     specs = build_order_specs(cust_ids, var_ids, to_add)
     create_orders(loc, specs)
 
+    print("\n--- Ensuring tipped orders exist (created fresh + paid with tip) ---")
+    create_tipped_orders(loc, cust_ids, var_ids)
+
     print("\n--- Re-running data_source verification ---")
     import data_source as ds
 
@@ -293,12 +414,16 @@ def main() -> None:
     vip = [c for c in customers if "vip" in c["tags"]]
     at_risk = [c for c in customers if "at_risk" in c["tags"]]
     new = [c for c in customers if "new" in c["tags"]]
+    orders = s.orders()
+    tipped = [o for o in orders if o.get("tip")]
+    total_tips = round(sum(o.get("tip", 0) for o in orders), 2)
     print("source:", s.name)
     print("branches:", len(s.branches()))
     print("menu count:", len(s.menu()))
-    print("orders count:", len(s.orders()))
+    print("orders count:", len(orders))
     print("customers count:", len(customers))
     print(f"segments -> vip: {len(vip)} | at_risk: {len(at_risk)} | new: {len(new)}")
+    print(f"tips -> {len(tipped)}/{len(orders)} orders tipped, ${total_tips:,.2f} total")
 
 
 if __name__ == "__main__":

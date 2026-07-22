@@ -8,6 +8,7 @@ import {
     emailRegister,
     customTokenSignIn,
     firebaseSignOut,
+    googleSignIn,
 } from "@/lib/firebase";
 
 const AuthCtx = createContext(null);
@@ -24,9 +25,10 @@ export function AuthProvider({ children }) {
     const [ready, setReady] = useState(!firebaseEnabled);
     // "unlocked" means identity was proven THIS page-load (fresh login or PIN).
     const [unlocked, setUnlocked] = useState(false);
+    // COMMENTED OUT — replaced by new AuthModal (Google/Apple/Phone/Email). Rollback if needed.
     // Set when the user taps "Forgot PIN" — forces the set-PIN screen after the
     // fallback full login so they can choose a new one.
-    const [forcePinSetup, setForcePinSetup] = useState(false);
+    // const [forcePinSetup, setForcePinSetup] = useState(false);
     // True only when a full sign-in happened in this session (vs. a restored
     // session on page load) — lets us skip the PIN lock right after logging in.
     const freshLoginRef = useRef(false);
@@ -84,6 +86,14 @@ export function AuthProvider({ children }) {
         setUnlocked(true);
         return res;
     };
+    // --- Google sign-in (added for the new AuthModal). Same freshLoginRef +
+    // setUnlocked handshake as email/phone so routing reacts identically. ---
+    const loginWithGoogle = async () => {
+        freshLoginRef.current = true;
+        const res = await googleSignIn();
+        setUnlocked(true);
+        return res;
+    };
     // Phone OTP via Twilio Verify (backend), then finish with a Firebase custom
     // token. Same freshLoginRef + setUnlocked handshake as email login, so the
     // React Router auth-flow gate triggers identically after phone login.
@@ -102,43 +112,47 @@ export function AuthProvider({ children }) {
         return res;
     };
 
+    // COMMENTED OUT — replaced by new AuthModal (Google/Apple/Phone/Email). Rollback if needed.
+    // PIN quick-unlock removed: the new AuthModal is the only sign-in surface and
+    // there is no PIN lock/setup step anymore. Firebase session persistence alone
+    // decides whether the user is signed in. Backend /me/pin endpoints are untouched.
     // --- PIN quick-unlock ---
-    const setPin = async (pin) => {
-        const { data } = await api.post("/me/pin", { pin });
-        setProfile((p) => ({ ...(p || {}), has_pin: true }));
-        setForcePinSetup(false);
-        setUnlocked(true);
-        return data;
-    };
-
-    // Throws Error with .code =
-    //   "wrong"   → PIN didn't match (403)
-    //   "expired" → session/token gone (401); we log out for a full re-login
-    //   "error"   → server down / network / 400 no-PIN — NOT the user's fault,
-    //               so the UI must not blame their PIN.
-    const verifyPin = async (pin) => {
-        try {
-            await api.post("/me/pin/verify", { pin });
-            setUnlocked(true);
-        } catch (e) {
-            const status = e?.response?.status;
-            if (status === 401) {
-                await logout(); // session/token dead → force full login
-                const err = new Error("expired");
-                err.code = "expired";
-                throw err;
-            }
-            const err = new Error(status === 403 ? "wrong" : "error");
-            err.code = status === 403 ? "wrong" : "error";
-            throw err;
-        }
-    };
-
-    // "Forgot PIN" → drop the session and require a new PIN after re-login.
-    const forgotPin = async () => {
-        setForcePinSetup(true);
-        await logout();
-    };
+    // const setPin = async (pin) => {
+    //     const { data } = await api.post("/me/pin", { pin });
+    //     setProfile((p) => ({ ...(p || {}), has_pin: true }));
+    //     setForcePinSetup(false);
+    //     setUnlocked(true);
+    //     return data;
+    // };
+    //
+    // // Throws Error with .code =
+    // //   "wrong"   → PIN didn't match (403)
+    // //   "expired" → session/token gone (401); we log out for a full re-login
+    // //   "error"   → server down / network / 400 no-PIN — NOT the user's fault,
+    // //               so the UI must not blame their PIN.
+    // const verifyPin = async (pin) => {
+    //     try {
+    //         await api.post("/me/pin/verify", { pin });
+    //         setUnlocked(true);
+    //     } catch (e) {
+    //         const status = e?.response?.status;
+    //         if (status === 401) {
+    //             await logout(); // session/token dead → force full login
+    //             const err = new Error("expired");
+    //             err.code = "expired";
+    //             throw err;
+    //         }
+    //         const err = new Error(status === 403 ? "wrong" : "error");
+    //         err.code = status === 403 ? "wrong" : "error";
+    //         throw err;
+    //     }
+    // };
+    //
+    // // "Forgot PIN" → drop the session and require a new PIN after re-login.
+    // const forgotPin = async () => {
+    //     setForcePinSetup(true);
+    //     await logout();
+    // };
 
     const logout = async () => {
         if (firebaseEnabled) await firebaseSignOut();
@@ -159,18 +173,20 @@ export function AuthProvider({ children }) {
     const needsOnboarding = Boolean(
         fbUser && (!profile || !profile.restaurant_name)
     );
-    const needsPinSetup = Boolean(
-        fbUser && profile && (!profile.has_pin || forcePinSetup)
-    );
+    // COMMENTED OUT — replaced by new AuthModal (Google/Apple/Phone/Email). Rollback if needed.
+    // PIN setup / lock gating removed — the AuthModal is the only sign-in surface.
+    // const needsPinSetup = Boolean(
+    //     fbUser && profile && (!profile.has_pin || forcePinSetup)
+    // );
     // After onboarding + PIN, a first-time user must "connect" a POS (which
     // seeds their demo data). pos_provider stays NULL until they pick one.
     const needsPosSetup = Boolean(
         fbUser && profile && profile.restaurant_name && profile.has_pin
         && !forcePinSetup && !profile.pos_provider
     );
-    const locked = Boolean(
-        fbUser && profile && profile.has_pin && !unlocked && !forcePinSetup
-    );
+    // const locked = Boolean(
+    //     fbUser && profile && profile.has_pin && !unlocked && !forcePinSetup
+    // );
 
     return (
         <AuthCtx.Provider
@@ -182,16 +198,19 @@ export function AuthProvider({ children }) {
                 profile,
                 sessionActive,
                 needsOnboarding,
-                needsPinSetup,
+                // COMMENTED OUT — replaced by new AuthModal. Rollback if needed.
+                // needsPinSetup,
                 needsPosSetup,
-                locked,
+                // locked,
                 loginWithEmail,
                 registerWithEmail,
+                loginWithGoogle,
                 sendPhoneOtp,
                 verifyPhoneOtp,
-                setPin,
-                verifyPin,
-                forgotPin,
+                // COMMENTED OUT — replaced by new AuthModal. Rollback if needed.
+                // setPin,
+                // verifyPin,
+                // forgotPin,
                 refreshProfile,
                 updateProfile,
                 logout,

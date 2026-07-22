@@ -10,6 +10,8 @@ import {
     createUserWithEmailAndPassword,
     signInWithCustomToken,
     signOut,
+    GoogleAuthProvider,
+    signInWithPopup,
 } from "firebase/auth";
 
 const cfg = {
@@ -43,6 +45,12 @@ export const emailSignIn = (email, password) =>
 
 export const emailRegister = (email, password) =>
     createUserWithEmailAndPassword(auth, email, password);
+
+// --- Google (added for the new AuthModal — reuses the same Firebase `auth`
+// instance). Requires Google to be enabled as a sign-in provider in the
+// Firebase console (Authentication → Sign-in method → Google). ---
+const googleProvider = new GoogleAuthProvider();
+export const googleSignIn = () => signInWithPopup(auth, googleProvider);
 
 // --- Phone (OTP via Twilio Verify) ---
 // Firebase's built-in Phone Auth is replaced by Twilio (see backend
